@@ -22,8 +22,14 @@ function failed<T>(error: unknown): NativeResult<T> {
   };
 }
 
+async function withNativeErrorHandling<T>(
+  operation: () => Promise<NativeResult<T>>
+): Promise<NativeResult<T>> {
+  return operation().catch((error) => failed<T>(error));
+}
+
 async function openFile(filters: Electron.FileFilter[]): Promise<NativeResult<OpenedFile>> {
-  try {
+  return withNativeErrorHandling(async () => {
     const result = await dialog.showOpenDialog({
       properties: ["openFile"],
       filters
@@ -41,9 +47,7 @@ async function openFile(filters: Electron.FileFilter[]): Promise<NativeResult<Op
         data: new Uint8Array(data)
       }
     };
-  } catch (error) {
-    return failed(error);
-  }
+  });
 }
 
 export function registerFileHandlers(): void {
@@ -56,7 +60,7 @@ export function registerFileHandlers(): void {
   );
 
   ipcMain.handle(IPC_CHANNELS.saveProject, async (_event, input): Promise<NativeResult<SavedPath>> => {
-    try {
+    return withNativeErrorHandling(async () => {
       const request = saveProjectRequestSchema.parse(input);
       const suggestedName = request.suggestedName.toLocaleLowerCase("en-US").endsWith(".moldmaker")
         ? request.suggestedName
@@ -70,13 +74,11 @@ export function registerFileHandlers(): void {
 
       await fs.writeFile(result.filePath, request.data);
       return { ok: true, value: { path: result.filePath } };
-    } catch (error) {
-      return failed(error);
-    }
+    });
   });
 
   ipcMain.handle(IPC_CHANNELS.exportFiles, async (_event, input): Promise<NativeResult<SavedPath>> => {
-    try {
+    return withNativeErrorHandling(async () => {
       const request = exportFilesRequestSchema.parse(input);
       const result = await dialog.showOpenDialog({ properties: ["openDirectory", "createDirectory"] });
 
@@ -87,9 +89,7 @@ export function registerFileHandlers(): void {
         request.files.map((file) => fs.writeFile(path.join(exportDirectory, file.name), file.data))
       );
       return { ok: true, value: { path: exportDirectory } };
-    } catch (error) {
-      return failed(error);
-    }
+    });
   });
 
   ipcMain.handle(IPC_CHANNELS.appInfo, () => ({

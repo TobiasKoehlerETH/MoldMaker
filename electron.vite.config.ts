@@ -5,7 +5,14 @@ import { defineConfig } from "electron-vite";
 
 export default defineConfig({
   main: {},
-  preload: {},
+  preload: {
+    // Sandboxed preload scripts cannot resolve Node's module loader. Bundle
+    // shared runtime dependencies (such as the IPC contract's zod import)
+    // into the preload instead of leaving them as external requires.
+    build: {
+      externalizeDeps: false
+    }
+  },
   renderer: {
     resolve: {
       alias: {

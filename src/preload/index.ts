@@ -10,14 +10,19 @@ import {
   type SaveProjectRequest
 } from "../shared/electron-api";
 
-const api: MoldMakerApi = {
-  openStepFile: (): Promise<NativeResult<OpenedFile>> => ipcRenderer.invoke(IPC_CHANNELS.openStep),
-  openProjectFile: (): Promise<NativeResult<OpenedFile>> => ipcRenderer.invoke(IPC_CHANNELS.openProject),
-  saveProjectFile: (request: SaveProjectRequest): Promise<NativeResult<SavedPath>> =>
-    ipcRenderer.invoke(IPC_CHANNELS.saveProject, request),
-  exportFiles: (request: ExportFilesRequest): Promise<NativeResult<SavedPath>> =>
-    ipcRenderer.invoke(IPC_CHANNELS.exportFiles, request),
-  getAppInfo: (): Promise<AppInfo> => ipcRenderer.invoke(IPC_CHANNELS.appInfo)
-};
+type IpcChannel = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS];
+
+const invoke = <T>(channel: IpcChannel, ...args: unknown[]) =>
+  ipcRenderer.invoke(channel, ...args) as Promise<T>;
+
+const api = {
+  openStepFile: () => invoke<NativeResult<OpenedFile>>(IPC_CHANNELS.openStep),
+  openProjectFile: () => invoke<NativeResult<OpenedFile>>(IPC_CHANNELS.openProject),
+  saveProjectFile: (request: SaveProjectRequest) =>
+    invoke<NativeResult<SavedPath>>(IPC_CHANNELS.saveProject, request),
+  exportFiles: (request: ExportFilesRequest) =>
+    invoke<NativeResult<SavedPath>>(IPC_CHANNELS.exportFiles, request),
+  getAppInfo: () => invoke<AppInfo>(IPC_CHANNELS.appInfo)
+} satisfies MoldMakerApi;
 
 contextBridge.exposeInMainWorld("moldMaker", api);

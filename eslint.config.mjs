@@ -5,7 +5,7 @@ import globals from "globals";
 import tseslint from "typescript-eslint";
 
 export default tseslint.config(
-  { ignores: ["node_modules", "out", "release", "coverage"] },
+  { ignores: ["node_modules", "out", "release", "coverage", "playwright-report", "test-results"] },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {
@@ -29,6 +29,14 @@ export default tseslint.config(
     rules: {
       ...reactHooks.configs.recommended.rules,
       "react-refresh/only-export-components": ["warn", { "allowConstantExport": true }]
+    }
+  },
+  {
+    files: ["src/renderer/src/components/ui/**/*.{ts,tsx}", "src/renderer/src/hooks/use-mobile.tsx"],
+    rules: {
+      "react-hooks/purity": "off",
+      "react-hooks/set-state-in-effect": "off",
+      "react-refresh/only-export-components": "off"
     }
   }
 );

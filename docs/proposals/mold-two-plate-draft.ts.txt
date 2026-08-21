@@ -1,0 +1,116 @@
+import { z } from "zod";
+import type { PartModel } from "./step";
+import type { Vec3 } from "./vec3";
+
+export const moldParamsSchema = z.object({
+  wallThickness: z.number().min(3).max(30),
+  injectionDiameter: z.number().min(1).max(10),
+  ventDiameter: z.number().min(0.2).max(2),
+  shrinkagePercent: z.number().min(0).max(5)
+});
+
+export type MoldParams = z.infer<typeof moldParamsSchema>;
+export type SplitAxis = 0 | 1 | 2;
+
+export interface Mold {
+  splitAxis: SplitAxis;
+  partEdges: Vec3[][];
+  min: Vec3;
+  max: Vec3;
+  splitZ: number;
+  gate: Vec3;
+  vents: Vec3[];
+  pins: [number, number][];
+  size: Vec3;
+}
+
+export const DEFAULT_PARAMS: MoldParams = {
+  wallThickness: 6,
+  injectionDiameter: 3.2,
+  ventDiameter: 0.8,
+  shrinkagePercent: 0.2
+};
+
+const orient = ([x, y, z]: Vec3, axis: SplitAxis): Vec3 =>
+  axis === 0 ? [-z, y, x] : axis === 1 ? [x, -z, y] : [x, y, z];
+
+const bounds = (edges: Vec3[][]): [Vec3, Vec3] => {
+  const min: Vec3 = [Infinity, Infinity, Infinity];
+  const max: Vec3 = [-Infinity, -Infinity, -Infinity];
+  for (const point of edges.flat()) {
+    for (const axis of [0, 1, 2] as const) {
+      min[axis] = Math.min(min[axis], point[axis]);
+      max[axis] = Math.max(max[axis], point[axis]);
+    }
+  }
+  return [min, max];
+};
+
+/** Uses the thinnest part axis as the split direction to minimise print time. */
+export function splitAxis(part: PartModel): SplitAxis {
+  const spans = part.max.map((value, axis) => value - part.min[axis]);
+  return spans.indexOf(Math.min(...spans)) as SplitAxis;
+}
+
+/** A lightweight preview plan. OpenCascade builds the exact solids from the same parameters. */
+export function buildMold(part: PartModel, params: MoldParams): Mold {
+  const axis = splitAxis(part);
+  const oriented = part.edges.map((edge) => edge.map((point) => orient(point, axis)));
+  const [partMin, partMax] = bounds(oriented);
+  const factor = 1 + params.shrinkagePercent / 100;
+  const center = partMin.map((value, index) => (value + partMax[index]) / 2) as Vec3;
+  const partEdges = oriented.map((edge) =>
+    edge.map((point) => point.map((value, index) => center[index] + (value - center[index]) * factor) as Vec3)
+  );
+  const [cavityMin, cavityMax] = bounds(partEdges);
+  const wall = params.wallThickness;
+  const min = cavityMin.map((value) => value - wall) as Vec3;
+  const max = cavityMax.map((value) => value + wall) as Vec3;
+  const splitZ = (cavityMin[2] + cavityMax[2]) / 2;
+  const top = partEdges.flat().filter((point) => cavityMax[2] - point[2] < 0.1);
+  const middle: [number, number] = [(cavityMin[0] + cavityMax[0]) / 2, (cavityMin[1] + cavityMax[1]) / 2];
+  const distance = (point: Vec3, target: [number, number]): number => Math.hypot(point[0] - target[0], point[1] - target[1]);
+  const gate = [...top].sort((a, b) => distance(a, middle) - distance(b, middle))[0] ?? [middle[0], middle[1], cavityMax[2]];
+  const vents = [...top].sort((a, b) => distance(b, [gate[0], gate[1]]) - distance(a, [gate[0], gate[1]])).slice(0, 2);
+  const inset = wall / 2;
+  const pins: [number, number][] = [
+    [min[0] + inset, min[1] + inset],
+    [max[0] - inset, min[1] + inset],
+    [max[0] - inset, max[1] - inset],
+    [min[0] + inset, max[1] - inset]
+  ];
+
+  return {
+    splitAxis: axis,
+    partEdges,
+    min,
+    max,
+    splitZ,
+    gate,
+    vents,
+    pins,
+    size: max.map((value, index) => value - min[index]) as Vec3
+  };
+}
+
+const rectangle = (mold: Mold, z: number): Vec3[] => [
+  [mold.min[0], mold.min[1], z],
+  [mold.max[0], mold.min[1], z],
+  [mold.max[0], mold.max[1], z],
+  [mold.min[0], mold.max[1], z],
+  [mold.min[0], mold.min[1], z]
+];
+
+/** Exact outer envelope, split seam, gate, vents, and registration locations for the preview. */
+export function moldWireframe(mold: Mold): Vec3[][] {
+  const corners = rectangle(mold, mold.min[2]).slice(0, 4);
+  return [
+    rectangle(mold, mold.min[2]),
+    rectangle(mold, mold.splitZ),
+    rectangle(mold, mold.max[2]),
+    ...corners.map(([x, y]): Vec3[] => [[x, y, mold.min[2]], [x, y, mold.max[2]]]),
+    [[mold.gate[0], mold.gate[1], mold.gate[2]], [mold.gate[0], mold.gate[1], mold.max[2]]],
+    ...mold.vents.map(([x, y, z]): Vec3[] => [[x, y, z], [x, y, mold.max[2]]]),
+    ...mold.pins.map(([x, y]): Vec3[] => [[x, y, mold.splitZ - 1], [x, y, mold.splitZ + 3]])
+  ];
+}

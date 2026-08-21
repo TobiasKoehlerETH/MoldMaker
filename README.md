@@ -1,6 +1,15 @@
 # MoldMaker
 
-MoldMaker is an offline Electron desktop workspace for creating molds from STEP files. The current foundation supports opening a STEP file and validating native project/export file contracts; 3D preview and mold generation are planned for the CAD phase.
+MoldMaker turns a finished part's STEP file into a printable two-part RTV silicone injection mold. It runs locally: upload the part, inspect the automatically generated tool, then export both mold halves as STEP and binary STL.
+
+## Workflow
+
+1. Select **Import STEP** and choose the finished part.
+2. MoldMaker rotates the thinnest part axis onto the split direction, adds a shrinkage-compensated cavity, printable walls, four registration pins, one syringe gate, and up to two air vents.
+3. Inspect the exact OpenCascade result in the CAD viewport. Shading modes include solid, transparent, ghosted half, full edges, hidden cast part, and exploded view.
+4. Select **Export mold**. The chosen directory receives `*-lower.step`, `*-upper.step`, `*-lower.stl`, and `*-upper.stl`.
+
+The defaults target a general RTV workflow: 6 mm walls, a 3.2 mm syringe port, 0.8 mm vents, and 0.2% scale compensation. Confirm shrinkage against the silicone datasheet and inspect the split/gate placement before printing, especially for parts with deep undercuts.
 
 ## Development
 
@@ -9,7 +18,7 @@ npm install
 npm run dev
 ```
 
-Useful checks:
+Quality gates:
 
 ```bash
 npm run typecheck
@@ -17,7 +26,30 @@ npm run lint
 npm run test
 npm run build
 npm run check
+npm run test:e2e
 ```
+
+## Agent preview and feature testing
+
+The Electron app has a Playwright harness that launches the production build, drives the real renderer and preload bridge, and safely substitutes native file-dialog answers from the Electron main process.
+
+```bash
+# Build, run the feature suite, capture screenshots, and write feedback
+npm run test:e2e
+
+# Inspect and rerun tests interactively
+npm run test:e2e:ui
+
+# Step through a test with Playwright Inspector
+npm run test:e2e:debug
+
+# Open the latest HTML report
+npm run test:e2e:report
+```
+
+Every run writes a concise agent-readable summary to `test-results/feedback.md`. Detailed results and attached screenshots are available in `playwright-report/index.html`; failure traces and raw artifacts are under `test-results/artifacts`. These generated folders are ignored by Git.
+
+For a manual software preview, use `npm run dev` during development or `npm run preview:agent` against a fresh production bundle.
 
 ## Code navigation
 
@@ -36,7 +68,7 @@ src/main/       Electron main process and native file handlers
 src/preload/    isolated contextBridge API
 src/shared/     IPC channel names, Zod schemas, and shared types
 src/renderer/   React UI, Zustand state, styles, and UI primitives
-tests/          Vitest contract tests
+tests/          Unit, contract, and Electron end-to-end tests
 sample/         sample STEP input
 docs/           architecture notes and generated code graph
 ```
