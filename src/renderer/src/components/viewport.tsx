@@ -54,7 +54,8 @@ export function Viewport({ preview, view, onSelect }: ViewportProps) {
   const controlsRef = useRef<OrbitControls | null>(null);
   const gridRef = useRef<THREE.GridHelper | null>(null);
   const fitRef = useRef<() => void>(() => undefined);
-  const lastPreviewRef = useRef<CadPreview | null>(null);
+  const invalidateRef = useRef<() => void>(() => undefined);
+  const explodeTravelRef = useRef(0);
   const pressRef = useRef<[number, number] | null>(null);
 
   useEffect(() => {
@@ -64,8 +65,15 @@ export function Viewport({ preview, view, onSelect }: ViewportProps) {
     const scene = new THREE.Scene();
     const camera = new THREE.PerspectiveCamera(32, 1, 0.01, 10_000);
     camera.up.set(0, 0, 1);
-    const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    const renderer = new THREE.WebGLRenderer({
+      canvas,
+      antialias: true,
+      alpha: true,
+      powerPreference: "high-performance"
+    });
+    // A 2x display renders four times as many fragments. The modest cap is
+    // visually crisp for CAD edges without overwhelming integrated GPUs.
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.15;
@@ -88,30 +96,57 @@ export function Viewport({ preview, view, onSelect }: ViewportProps) {
     fill.position.set(-80, 40, 50);
     scene.add(key, fill);
 
-    let frame = 0;
-    const draw = () => {
-      frame = requestAnimationFrame(draw);
-      controls.update();
-      renderer.render(scene, camera);
+    let frame: number | null = null;
+    const invalidate = () => {
+      if (frame === null) frame = requestAnimationFrame(draw);
     };
-    draw();
+    const draw = () => {
+      frame = null;
+      const dampingActive = controls.update();
+      renderer.render(scene, camera);
+      // Keep rendering only while OrbitControls is easing toward rest.
+      if (dampingActive) invalidate();
+    };
+    invalidateRef.current = invalidate;
+    controls.addEventListener("change", invalidate);
 
-    const resize = new ResizeObserver(() => {
-      const { clientWidth, clientHeight } = canvas;
-      renderer.setSize(clientWidth, clientHeight, false);
-      camera.aspect = clientWidth / Math.max(clientHeight, 1);
+    let width = 0;
+    let height = 0;
+    const resizeCanvas = () => {
+      const nextWidth = Math.max(Math.round(canvas.clientWidth), 1);
+      const nextHeight = Math.max(Math.round(canvas.clientHeight), 1);
+      if (nextWidth === width && nextHeight === height) return;
+      width = nextWidth;
+      height = nextHeight;
+      renderer.setSize(width, height, false);
+      camera.aspect = width / height;
       camera.updateProjectionMatrix();
-    });
+      invalidate();
+    };
+    const resize = new ResizeObserver(resizeCanvas);
     resize.observe(canvas);
+    resizeCanvas();
     sceneRef.current = scene;
     cameraRef.current = camera;
     controlsRef.current = controls;
+    invalidate();
 
     return () => {
-      cancelAnimationFrame(frame);
+      invalidateRef.current = () => undefined;
+      if (frame !== null) cancelAnimationFrame(frame);
       resize.disconnect();
+      controls.removeEventListener("change", invalidate);
       controls.dispose();
+      if (modelRef.current) dispose(modelRef.current);
+      grid.geometry.dispose();
+      const gridMaterials = Array.isArray(grid.material) ? grid.material : [grid.material];
+      gridMaterials.forEach((material) => material.dispose());
       renderer.dispose();
+      sceneRef.current = null;
+      cameraRef.current = null;
+      controlsRef.current = null;
+      gridRef.current = null;
+      modelRef.current = null;
     };
   }, []);
 
@@ -125,7 +160,12 @@ export function Viewport({ preview, view, onSelect }: ViewportProps) {
       dispose(modelRef.current);
       modelRef.current = null;
     }
-    if (!preview) return;
+    explodeTravelRef.current = 0;
+    fitRef.current = () => undefined;
+    if (!preview) {
+      invalidateRef.current();
+      return;
+    }
 
     const group = new THREE.Group();
     const sources: Record<SceneObjectId, CadMesh> = {
@@ -135,9 +175,6 @@ export function Viewport({ preview, view, onSelect }: ViewportProps) {
     };
 
     for (const id of OBJECT_ORDER) {
-      const opacity = OPACITY[view.objects[id]];
-      if (opacity === 0) continue;
-
       const style = STYLES[id];
       const solid = new THREE.Mesh(
         geometry(sources[id]),
@@ -145,9 +182,6 @@ export function Viewport({ preview, view, onSelect }: ViewportProps) {
           color: style.colour,
           metalness: style.metalness,
           roughness: style.roughness,
-          transparent: opacity < 1,
-          opacity,
-          depthWrite: opacity === 1,
           side: THREE.DoubleSide
         })
       );
@@ -155,32 +189,21 @@ export function Viewport({ preview, view, onSelect }: ViewportProps) {
       solid.userData.id = id;
       group.add(solid);
 
-      if (view.showEdges) {
-        const edgeGeometry = new THREE.BufferGeometry();
-        edgeGeometry.setAttribute("position", new THREE.BufferAttribute(new Float32Array(sources[id].edges), 3));
-        const lines = new THREE.LineSegments(
-          edgeGeometry,
-          new THREE.LineBasicMaterial({
-            color: style.edge,
-            transparent: true,
-            opacity: opacity < 1 ? 0.75 : 0.95,
-            depthTest: opacity === 1
-          })
-        );
-        lines.renderOrder = 10;
-        solid.add(lines);
-      }
-    }
-
-    if (view.explode > 0) {
-      const travel = new THREE.Box3().setFromObject(group).getSize(new THREE.Vector3()).z * EXPLODE_TRAVEL;
-      const shift = (travel * view.explode) / 2;
-      group.getObjectByName("lower")?.position.setZ(-shift);
-      group.getObjectByName("upper")?.position.setZ(shift);
+      const edgeGeometry = new THREE.BufferGeometry();
+      edgeGeometry.setAttribute("position", new THREE.BufferAttribute(new Float32Array(sources[id].edges), 3));
+      const lines = new THREE.LineSegments(
+        edgeGeometry,
+        new THREE.LineBasicMaterial({ color: style.edge, transparent: true })
+      );
+      lines.name = `${id}-edges`;
+      lines.renderOrder = 10;
+      solid.add(lines);
     }
 
     scene.add(group);
     modelRef.current = group;
+    const initialBox = new THREE.Box3().setFromObject(group);
+    explodeTravelRef.current = initialBox.getSize(new THREE.Vector3()).z * EXPLODE_TRAVEL;
     fitRef.current = () => {
       const box = new THREE.Box3().setFromObject(group);
       const center = box.getCenter(new THREE.Vector3());
@@ -193,10 +216,44 @@ export function Viewport({ preview, view, onSelect }: ViewportProps) {
       camera.far = Math.max(radius * 50, 1000);
       camera.updateProjectionMatrix();
       controls.update();
+      invalidateRef.current();
     };
-    // Only reframe for a new mold, so changing view options keeps the camera.
-    if (preview !== lastPreviewRef.current) fitRef.current();
-    lastPreviewRef.current = preview;
+    fitRef.current();
+  }, [preview]);
+
+  // Visibility, edges, and explode are presentation-only changes. Updating the
+  // existing objects avoids reallocating and re-uploading every mesh buffer.
+  useEffect(() => {
+    const group = modelRef.current;
+    if (!group || !preview) return;
+
+    for (const id of OBJECT_ORDER) {
+      const solid = group.getObjectByName(id) as THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial> | undefined;
+      if (!solid) continue;
+      const opacity = OPACITY[view.objects[id]];
+      const transparent = opacity < 1;
+      solid.visible = opacity > 0;
+      solid.material.opacity = opacity;
+      solid.material.depthWrite = !transparent;
+      if (solid.material.transparent !== transparent) {
+        solid.material.transparent = transparent;
+        solid.material.needsUpdate = true;
+      }
+
+      const lines = solid.getObjectByName(`${id}-edges`) as
+        | THREE.LineSegments<THREE.BufferGeometry, THREE.LineBasicMaterial>
+        | undefined;
+      if (lines) {
+        lines.visible = view.showEdges && opacity > 0;
+        lines.material.opacity = transparent ? 0.75 : 0.95;
+        lines.material.depthTest = !transparent;
+      }
+    }
+
+    const shift = (explodeTravelRef.current * view.explode) / 2;
+    group.getObjectByName("lower")?.position.setZ(-shift);
+    group.getObjectByName("upper")?.position.setZ(shift);
+    invalidateRef.current();
   }, [preview, view]);
 
   /** Picks the front-most mold body under the pointer, ignoring orbit drags. */
@@ -216,7 +273,8 @@ export function Viewport({ preview, view, onSelect }: ViewportProps) {
     );
     const raycaster = new THREE.Raycaster();
     raycaster.setFromCamera(pointer, camera);
-    const hit = raycaster.intersectObjects(group.children, false)[0];
+    const visibleBodies = group.children.filter((child) => child.visible);
+    const hit = raycaster.intersectObjects(visibleBodies, false)[0];
     const id = hit?.object.userData.id as SceneObjectId | undefined;
     onSelect(id ? { id, x: event.clientX - rect.left, y: event.clientY - rect.top } : null);
   }
