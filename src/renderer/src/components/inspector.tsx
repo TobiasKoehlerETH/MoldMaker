@@ -274,28 +274,6 @@ function MoldPanel({ params, mold, onChange }: Pick<InspectorProps, "params" | "
           )}
         </SidebarGroupContent>
       </SidebarGroup>
-
-      <SidebarSeparator />
-
-      <SidebarGroup>
-        <SidebarGroupLabel>Generated</SidebarGroupLabel>
-        <SidebarGroupContent className="space-y-2 px-2 text-xs">
-          <div className="flex justify-between gap-3 text-sidebar-foreground/65">
-            <span>Tool</span>
-            <span className="text-right tabular-nums text-sidebar-foreground">{mold ? `${mold.size.map(format).join(" × ")} mm` : "—"}</span>
-          </div>
-          <div className="flex justify-between text-sidebar-foreground/65">
-            <span>Split</span>
-            <span className="text-sidebar-foreground">
-              {mold ? ["X", "Y", "Z"][mold.splitAxis] : "—"} · {params.splitOffset === 0 ? "auto" : "manual"}
-            </span>
-          </div>
-          <div className="flex justify-between text-sidebar-foreground/65">
-            <span>Flow</span>
-            <span className="text-sidebar-foreground">1 gate · {mold?.vents.length ?? 0} vents</span>
-          </div>
-        </SidebarGroupContent>
-      </SidebarGroup>
     </>
   );
 }
