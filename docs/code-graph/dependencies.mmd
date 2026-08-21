@@ -1,0 +1,24 @@
+flowchart LR
+  n0[`src/main/files.ts`]
+  n1[`src/main/index.ts`]
+  n2[`src/preload/index.ts`]
+  n3[`src/renderer/src/App.tsx`]
+  n4[`src/renderer/src/components/ui/button.tsx`]
+  n5[`src/renderer/src/components/ui/tooltip.tsx`]
+  n6[`src/renderer/src/env.d.ts`]
+  n7[`src/renderer/src/lib/utils.ts`]
+  n8[`src/renderer/src/main.tsx`]
+  n9[`src/renderer/src/store/app-store.ts`]
+  n10[`src/renderer/src/styles.css`]
+  n11[`src/shared/electron-api.ts`]
+  n0 --> n11
+  n1 --> n0
+  n2 --> n11
+  n3 --> n4
+  n3 --> n5
+  n3 --> n9
+  n4 --> n7
+  n5 --> n7
+  n6 --> n11
+  n8 --> n3
+  n8 --> n10
