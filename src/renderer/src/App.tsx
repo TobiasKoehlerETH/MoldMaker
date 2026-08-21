@@ -16,17 +16,11 @@ import {
   SidebarProvider
 } from "@/components/ui/sidebar";
 import { BUILDING, useAppStore } from "@/store/app-store";
-import {
-  DEFAULT_VIEW,
-  NEXT_VISIBILITY,
-  type BodySelection,
-  type SceneObjectId,
-  type ViewState
-} from "@/viewport/modes";
+import { DEFAULT_VIEW, type BodySelection, type SceneObjectId, type ViewState } from "@/viewport/modes";
 import { generateMold } from "@/cad";
 import type { GeneratedMold } from "../../shared/cad";
 import type { NativeResult } from "../../shared/electron-api";
-import { buildMold, DEFAULT_PARAMS, type MoldParams } from "../../shared/mold";
+import { buildMold, DEFAULT_PARAMS, moldWireframe, type MoldParams } from "../../shared/mold";
 import { baseName, decodeProject, encodeProject } from "../../shared/project";
 import { readStepModel } from "../../shared/step";
 
@@ -82,6 +76,12 @@ export function App() {
   const [generated, setGenerated] = useState<GeneratedState | null>(null);
   const mold = useMemo(() => (part ? buildMold(part, params) : null), [part, params]);
   const ready = generated?.source === source && generated.params === params ? generated.result : null;
+  // The last solids stay on screen while the next ones build: a settings change
+  // should refine the model in place, not blank the viewport and re-frame it.
+  const preview = generated?.result.preview ?? null;
+  // Wireframe of the envelope and ports, drawn only while the solids are behind
+  // the settings, so an edit shows up immediately.
+  const plan = useMemo(() => (mold && !ready ? moldWireframe(mold) : null), [mold, ready]);
   const busy = status.endsWith("…");
 
   useEffect(() => {
@@ -116,15 +116,17 @@ export function App() {
     setView((current) => ({ ...current, objects: { ...current.objects, [id]: value } }));
   }, []);
 
-  const closeSelection = useCallback(() => setSelection(null), []);
-
-  /** Steps one body through solid, ghost, and hidden, for the sidebar rows. */
-  function cycleObject(id: SceneObjectId): void {
+  // The sidebar's eye is the plain show/hide; transparency comes from clicking
+  // the body itself, so hiding a ghosted body and showing it again returns it
+  // solid rather than to a state the eye never offered.
+  const toggleObject = useCallback((id: SceneObjectId): void => {
     setView((current) => ({
       ...current,
-      objects: { ...current.objects, [id]: NEXT_VISIBILITY[current.objects[id]] }
+      objects: { ...current.objects, [id]: current.objects[id] === "hidden" ? "solid" : "hidden" }
     }));
-  }
+  }, []);
+
+  const closeSelection = useCallback(() => setSelection(null), []);
 
   /** Runs a native call and reports its outcome in the status line. */
   async function run<T>(pending: Promise<NativeResult<T>>, onValue: (value: T) => string): Promise<void> {
@@ -142,6 +144,8 @@ export function App() {
     await run(window.moldMaker.openStepFile(), (file) => {
       const text = new TextDecoder().decode(file.data);
       const model = readStepModel(text);
+      // A different part gets a fresh camera, so the old solids have to go.
+      setGenerated(null);
       openPart(file.name, text, model, DEFAULT_PARAMS);
       return `STEP loaded · ${model.edges.length} edges`;
     });
@@ -151,6 +155,7 @@ export function App() {
     setStatus("Opening…");
     await run(window.moldMaker.openProjectFile(), (file) => {
       const project = decodeProject(file.data);
+      setGenerated(null);
       openPart(project.sourceName, project.step, readStepModel(project.step), project.params);
       return "Project loaded";
     });
@@ -231,7 +236,7 @@ export function App() {
             view={view}
             onChange={setParams}
             onViewChange={(patch) => setView((current) => ({ ...current, ...patch }))}
-            onCycleObject={cycleObject}
+            onToggleObject={toggleObject}
             onCollapse={() => setSidebarPanel(null)}
           />
         </Sidebar>
@@ -261,7 +266,7 @@ export function App() {
 
         <section className="viewport" aria-label="3D workspace">
           <div className="viewport-grid" />
-          <Viewport preview={ready?.preview ?? null} view={view} onSelect={setSelection} />
+          <Viewport preview={preview} plan={plan} view={view} onSelect={setSelection} />
 
           {selection && (
             <VisibilityMenu
