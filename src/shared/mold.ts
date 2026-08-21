@@ -62,7 +62,9 @@ export function partingHeight(points: Vec3[], min: Vec3, max: Vec3): number {
 
   for (const point of points) {
     const radius = planarDistance(point, centre);
-    if (radius > reach) {
+    // A flange has the same outer radius on both of its faces. Choose its
+    // lower face deterministically, leaving the flange cavity in the top half.
+    if (radius > reach + 1e-6 || (Math.abs(radius - reach) <= 1e-6 && point[2] < widest)) {
       reach = radius;
       widest = point[2];
     }

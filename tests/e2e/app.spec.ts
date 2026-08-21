@@ -2,6 +2,21 @@ import { mkdir, readFile, readdir, stat } from "node:fs/promises";
 import path from "node:path";
 import { capture, expect, paths, selectOpenPath, selectSavePath, test } from "./fixtures";
 
+const stlZBounds = (stl: Buffer): [number, number] => {
+  const triangles = stl.readUInt32LE(80);
+  let min = Infinity;
+  let max = -Infinity;
+  for (let triangle = 0; triangle < triangles; triangle += 1) {
+    const start = 84 + triangle * 50;
+    for (let vertex = 0; vertex < 3; vertex += 1) {
+      const z = stl.readFloatLE(start + 20 + vertex * 12);
+      min = Math.min(min, z);
+      max = Math.max(max, z);
+    }
+  }
+  return [min, max];
+};
+
 test("launches a minimal workspace with the nested sidebar rail", async ({ appPage }, testInfo) => {
   await expect(appPage.getByText("Untitled", { exact: true })).toBeVisible();
   await expect(appPage.getByText("MoldMaker", { exact: true })).toHaveCount(0);
@@ -88,10 +103,15 @@ test("imports, edits, saves, reloads, and exports a mold", async ({ electronApp,
     "sample-mold-upper.step",
     "sample-mold-upper.stl"
   ]);
-  for (const name of ["sample-mold-lower.stl", "sample-mold-upper.stl"]) {
-    const stl = await readFile(path.join(exportDir, name));
+  const stls = await Promise.all(
+    ["sample-mold-lower.stl", "sample-mold-upper.stl"].map((name) => readFile(path.join(exportDir, name)))
+  );
+  for (const stl of stls) {
     const triangleCount = stl.readUInt32LE(80);
     expect(triangleCount).toBeGreaterThan(0);
     expect(stl.length).toBe(84 + triangleCount * 50);
   }
+  const [, lowerTop] = stlZBounds(stls[0]);
+  const [upperBottom] = stlZBounds(stls[1]);
+  expect(upperBottom).toBeLessThan(lowerTop - 1);
 });

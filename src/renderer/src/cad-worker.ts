@@ -1,6 +1,7 @@
 import initOpenCascade from "replicad-opencascadejs";
 import openCascadeWasm from "replicad-opencascadejs/wasm?url";
 import {
+  basicFaceExtrusion,
   cast,
   getOC,
   importSTEP,
@@ -9,7 +10,8 @@ import {
   makeCylinder,
   setOC,
   type Shape3D,
-  type SimplePoint
+  type SimplePoint,
+  Vector
 } from "replicad";
 import type { CadMesh, GenerateMoldRequest, GenerateMoldResponse, GeneratedMold } from "../../shared/cad";
 import { flowPorts, partingHeight, screwPoints } from "../../shared/mold";
@@ -19,6 +21,8 @@ const ready = initOpenCascade({ locateFile: () => openCascadeWasm }).then(setOC)
 
 /** Tolerance for deciding that a component reaches the block wall. */
 const WALL_TOUCH = 0.1;
+/** Thickness used to discover enclosed regions immediately below the seam. */
+const SEAM_SAMPLE = 0.05;
 
 /** Splits a shape into its disconnected solid components. */
 function solidsOf(shape: Shape3D): Shape3D[] {
@@ -85,6 +89,64 @@ function moveCores(from: Shape3D, to: Shape3D, min: SimplePoint, max: SimplePoin
   return [source, target];
 }
 
+/**
+ * Gives enclosed regions at the parting line to the half they meet without a
+ * gap. A cap can leave its centre connected to the lower block through open
+ * space below the part, so disconnected-solid cleanup alone cannot find it.
+ * Sampling the seam exposes the enclosed footprint; projecting that footprint
+ * down and retaining only the volume that reaches the seam isolates the core
+ * that must hang from the upper half.
+ */
+function moveSeamCores(
+  lower: Shape3D,
+  upper: Shape3D,
+  part: Shape3D,
+  min: SimplePoint,
+  max: SimplePoint,
+  partBottom: number,
+  splitZ: number
+): [Shape3D, Shape3D] {
+  const sampleBottom = Math.max(min[2], splitZ - SEAM_SAMPLE);
+  const slab = makeBox([min[0], min[1], sampleBottom], [max[0], max[1], splitZ]).cut(part);
+  const regions = solidsOf(slab);
+  const enclosed = regions.filter((region) => !reachesWall(region, min, max));
+  let nextLower = lower;
+  let nextUpper = upper;
+
+  for (const region of enclosed) {
+    const faces = region.faces;
+    const footprint = faces.find(
+      (face) => face.geomType === "PLANE" && Math.abs(face.center.z - sampleBottom) < SEAM_SAMPLE
+    );
+    if (!footprint) {
+      faces.forEach((face) => face.delete());
+      continue;
+    }
+
+    // Stop at the part's underside. Reaching the block floor would let a
+    // through-hole in the part tether the base material to the pocket fill, and
+    // the whole base would be dragged into the upper half with it.
+    const projection = basicFaceExtrusion(footprint, new Vector([0, 0, partBottom - sampleBottom]));
+    faces.forEach((face) => face.delete());
+    const withinFootprint = nextLower.intersect(projection);
+    const candidates = solidsOf(withinFootprint);
+    const cores = candidates.filter((candidate) => candidate.boundingBox.bounds[1][2] >= splitZ - WALL_TOUCH);
+
+    for (const core of cores) {
+      nextLower = replace(nextLower, nextLower.cut(core));
+      nextUpper = replace(nextUpper, nextUpper.fuse(core));
+    }
+
+    candidates.forEach((candidate) => candidate.delete());
+    withinFootprint.delete();
+    projection.delete();
+  }
+
+  regions.forEach((region) => region.delete());
+  slab.delete();
+  return [nextLower, nextUpper];
+}
+
 const rotateToZ = (part: Shape3D, axis: 0 | 1 | 2): Shape3D => {
   if (axis === 0) return part.rotate(-90, [0, 0, 0], [0, 1, 0]);
   if (axis === 1) return part.rotate(90, [0, 0, 0], [1, 0, 0]);
@@ -125,8 +187,11 @@ async function generate({ step, params, splitAxis }: GenerateMoldRequest): Promi
   let lower = makeBox(min, [max[0], max[1], splitZ]).cut(part);
   let upper = makeBox([min[0], min[1], splitZ], max).cut(part);
 
-  // Hand each half the cores it must carry, in both directions, so neither ends
-  // up with a detached lump and both stay exact negatives of the part.
+  [lower, upper] = moveSeamCores(lower, upper, part, min, max, partMin[2], splitZ);
+
+  // Hand each half the cores it must carry so both stay exact negatives of the
+  // part: first the fill of any pocket opening at the parting plane, then any
+  // piece left detached from the half it landed in.
   [lower, upper] = moveCores(lower, upper, min, max);
   [upper, lower] = moveCores(upper, lower, min, max);
 

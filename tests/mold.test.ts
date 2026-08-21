@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { buildMold, DEFAULT_PARAMS, moldParamsSchema, splitAxis } from "../src/shared/mold";
+import { buildMold, DEFAULT_PARAMS, moldParamsSchema, partingHeight, splitAxis } from "../src/shared/mold";
 import { decodeProject, encodeProject } from "../src/shared/project";
 import { readStepModel } from "../src/shared/step";
 import { boundsOf, planarDistance } from "../src/shared/vec3";
@@ -34,6 +34,16 @@ describe("RTV mold plan", () => {
     expect(reach(atSplit)).toBeCloseTo(reach(points), 6);
     expect(mold.splitZ).toBeGreaterThanOrEqual(min[2]);
     expect(mold.splitZ).toBeLessThanOrEqual(max[2]);
+  });
+
+  it("uses the lower face when a widest flange has two coplanar edges", () => {
+    const points = [
+      [10, 0, 2],
+      [10, 0, 3],
+      [0, 5, 4]
+    ] satisfies [number, number, number][];
+
+    expect(partingHeight(points, [-10, -10, 0], [10, 10, 5])).toBe(2);
   });
 
   it("plans one injection gate, air vents, and four screw holes", () => {
