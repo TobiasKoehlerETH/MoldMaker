@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { buildMold, DEFAULT_PARAMS, moldParamsSchema, splitAxis } from "../src/shared/mold";
 import { decodeProject, encodeProject } from "../src/shared/project";
 import { readStepModel } from "../src/shared/step";
-import { boundsOf } from "../src/shared/vec3";
+import { boundsOf, planarDistance } from "../src/shared/vec3";
 
 const sample = readFileSync("sample/sample.STEP", "utf8");
 const part = readStepModel(sample);
@@ -19,8 +19,21 @@ describe("RTV mold plan", () => {
     expect(mold.size[0]).toBeCloseTo(42.06, 2);
     expect(mold.size[1]).toBeCloseTo(40.91, 2);
     expect(mold.size[2]).toBeCloseTo(17.11, 2);
-    const [min, max] = boundsOf(mold.partEdges.flat());
-    expect(mold.splitZ).toBeCloseTo((min[2] + max[2]) / 2, 6);
+  });
+
+  it("parts at the widest cross-section so neither half traps the casting", () => {
+    const mold = buildMold(part, DEFAULT_PARAMS);
+    const points = mold.partEdges.flat();
+    const [min, max] = boundsOf(points);
+    const centre: [number, number] = [(min[0] + max[0]) / 2, (min[1] + max[1]) / 2];
+    const reach = (subset: typeof points): number =>
+      subset.reduce((widest, point) => Math.max(widest, planarDistance(point, centre)), 0);
+
+    // The plane sits where the silhouette is widest, so both halves draw off it.
+    const atSplit = points.filter((point) => Math.abs(point[2] - mold.splitZ) < 0.01);
+    expect(reach(atSplit)).toBeCloseTo(reach(points), 6);
+    expect(mold.splitZ).toBeGreaterThanOrEqual(min[2]);
+    expect(mold.splitZ).toBeLessThanOrEqual(max[2]);
   });
 
   it("plans one injection gate, air vents, and four screw holes", () => {
