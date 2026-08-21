@@ -1,8 +1,11 @@
 import initOpenCascade from "replicad-opencascadejs";
 import openCascadeWasm from "replicad-opencascadejs/wasm?url";
 import {
+  cast,
+  getOC,
   importSTEP,
   makeBox,
+  makeCompound,
   makeCylinder,
   setOC,
   type Shape3D,
@@ -13,6 +16,74 @@ import { flowPorts, partingHeight, screwPoints } from "../../shared/mold";
 import type { Vec3 } from "../../shared/vec3";
 
 const ready = initOpenCascade({ locateFile: () => openCascadeWasm }).then(setOC);
+
+/** Tolerance for deciding that a component reaches the block wall. */
+const WALL_TOUCH = 0.1;
+
+/** Splits a shape into its disconnected solid components. */
+function solidsOf(shape: Shape3D): Shape3D[] {
+  const oc = getOC();
+  const explorer = new oc.TopExp_Explorer(
+    shape.wrapped,
+    oc.TopAbs_ShapeEnum.TopAbs_SOLID,
+    oc.TopAbs_ShapeEnum.TopAbs_SHAPE
+  );
+  const found: Shape3D[] = [];
+
+  while (explorer.More()) {
+    found.push(cast(explorer.Current()) as Shape3D);
+    explorer.Next();
+  }
+  explorer.delete();
+  return found;
+}
+
+/** A real mold half spans the block; anything landing strictly inside is a core. */
+function reachesWall(shape: Shape3D, min: SimplePoint, max: SimplePoint): boolean {
+  const [low, high] = shape.boundingBox.bounds;
+  return [0, 1].some(
+    (axis) => Math.abs(low[axis] - min[axis]) < WALL_TOUCH || Math.abs(high[axis] - max[axis]) < WALL_TOUCH
+  );
+}
+
+/**
+ * Moves free-floating components of `from` into `to`.
+ *
+ * Cutting the block at a flat plane leaves the fill of any upward-facing pocket
+ * — the inside of a dish, say — stranded below the plane, unattached to the
+ * base. That fill is the core: it has to hang off the opposite half, otherwise
+ * one half ships a loose lump and the pair stops being an exact negative of the
+ * part. Its top face is flush with the parting plane, so fusing it into the
+ * other half yields a single connected solid.
+ */
+function moveCores(from: Shape3D, to: Shape3D, min: SimplePoint, max: SimplePoint): [Shape3D, Shape3D] {
+  const pieces = solidsOf(from);
+  const wallPieces = pieces.filter((piece) => reachesWall(piece, min, max));
+  const cores = pieces.filter((piece) => !reachesWall(piece, min, max));
+  if (cores.length === 0) {
+    pieces.forEach((piece) => piece.delete());
+    return [from, to];
+  }
+  if (wallPieces.length === 0) {
+    pieces.forEach((piece) => piece.delete());
+    throw new Error("Mold half has no component connected to its outer wall");
+  }
+
+  // Rebuild the source from the components we want to retain. Boolean-cutting
+  // an exact child solid out of its parent compound can leave OpenCascade with
+  // an invalid shape that later fails STL export.
+  const source = wallPieces.length === 1
+    ? wallPieces[0].clone()
+    : makeCompound(wallPieces.map((piece) => piece.clone())).asShape3D();
+  let target = to;
+
+  for (const core of cores) {
+    target = replace(target, target.fuse(core));
+  }
+  from.delete();
+  pieces.forEach((piece) => piece.delete());
+  return [source, target];
+}
 
 const rotateToZ = (part: Shape3D, axis: 0 | 1 | 2): Shape3D => {
   if (axis === 0) return part.rotate(-90, [0, 0, 0], [0, 1, 0]);
@@ -53,6 +124,11 @@ async function generate({ step, params, splitAxis }: GenerateMoldRequest): Promi
   const splitZ = partingHeight(surface, partMin as Vec3, partMax as Vec3);
   let lower = makeBox(min, [max[0], max[1], splitZ]).cut(part);
   let upper = makeBox([min[0], min[1], splitZ], max).cut(part);
+
+  // Hand each half the cores it must carry, in both directions, so neither ends
+  // up with a detached lump and both stay exact negatives of the part.
+  [lower, upper] = moveCores(lower, upper, min, max);
+  [upper, lower] = moveCores(upper, lower, min, max);
 
   // Screw clearance holes span the whole height so a bolt passes through both
   // halves. `cut` leaves its tool intact, so one cylinder serves both cuts.

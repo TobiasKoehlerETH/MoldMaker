@@ -63,7 +63,7 @@ export interface ViewState {
 
 export const DEFAULT_VIEW: ViewState = {
   objects: { ...SHADING_MODES.transparent.objects },
-  explode: 0,
+  explode: 1,
   showEdges: true
 };
 

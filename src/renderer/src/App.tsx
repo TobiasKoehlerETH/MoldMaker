@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Box, Download, FolderOpen, Save, ScanLine, SlidersHorizontal, Upload } from "lucide-react";
+import { Box, Download, FolderOpen, LoaderCircle, Save, ScanLine, SlidersHorizontal, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Inspector } from "@/components/inspector";
 import { VisibilityMenu } from "@/components/visibility-menu";
@@ -69,6 +69,7 @@ export function App() {
   const source = useAppStore((state) => state.source);
   const part = useAppStore((state) => state.part);
   const params = useAppStore((state) => state.params);
+  const status = useAppStore((state) => state.status);
   const openPart = useAppStore((state) => state.openPart);
   const setParams = useAppStore((state) => state.setParams);
   const setStatus = useAppStore((state) => state.setStatus);
@@ -81,6 +82,7 @@ export function App() {
   const [generated, setGenerated] = useState<GeneratedState | null>(null);
   const mold = useMemo(() => (part ? buildMold(part, params) : null), [part, params]);
   const ready = generated?.source === source && generated.params === params ? generated.result : null;
+  const busy = status.endsWith("…");
 
   useEffect(() => {
     void window.moldMaker.getAppInfo().then((info) => setVersion(info.version));
@@ -98,7 +100,10 @@ export function App() {
           finishBuild("Mold ready · 2 print halves");
         })
         .catch((error: unknown) => {
-          if (current) setStatus(error instanceof Error ? error.message : "Mold generation failed");
+          if (current) {
+            console.error("Mold generation failed", error);
+            setStatus(error instanceof Error ? error.message : "Mold generation failed");
+          }
         });
     }, 250);
     return () => {
@@ -153,6 +158,7 @@ export function App() {
 
   async function saveProject(): Promise<void> {
     if (!fileName) return;
+    setStatus("Saving…");
     const data = encodeProject({ version: 1, sourceName: fileName, step: source, params });
     await run(
       window.moldMaker.saveProjectFile({ suggestedName: `${baseName(fileName)}.moldmaker`, data }),
@@ -162,6 +168,7 @@ export function App() {
 
   async function exportMold(): Promise<void> {
     if (!ready) return;
+    setStatus("Exporting…");
     const stem = `${baseName(fileName ?? "mold")}-mold`;
     await run(
       window.moldMaker.exportFiles({
@@ -234,6 +241,12 @@ export function App() {
         <header className="command-bar">
           <div className="file-name">{fileName ?? "Untitled"}</div>
           <div className="command-actions">
+            {busy && (
+              <span className="inline-flex items-center text-muted-foreground" role="status" aria-live="polite" title={status}>
+                <LoaderCircle className="size-4 animate-spin" aria-hidden="true" />
+                <span className="sr-only">{status}</span>
+              </span>
+            )}
             <Button variant="ghost" size="icon" aria-label="Open project" title="Open project" onClick={openProject}>
               <FolderOpen />
             </Button>
