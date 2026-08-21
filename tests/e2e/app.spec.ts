@@ -111,7 +111,12 @@ test("imports, edits, saves, reloads, and exports a mold", async ({ electronApp,
     expect(triangleCount).toBeGreaterThan(0);
     expect(stl.length).toBe(84 + triangleCount * 50);
   }
-  const [, lowerTop] = stlZBounds(stls[0]);
+  const [lowerBottom, lowerTop] = stlZBounds(stls[0]);
   const [upperBottom] = stlZBounds(stls[1]);
+  // The top half owns the pocket core, but it must stop on the sample's actual
+  // pocket floor. Projecting it to the part's lower bound manufactures a broad
+  // flat face exactly 7 mm above the bottom of this mold.
   expect(upperBottom).toBeLessThan(lowerTop - 1);
+  expect(upperBottom).toBeGreaterThan(lowerBottom + 7.25);
+  expect(upperBottom).toBeLessThan(lowerBottom + 7.75);
 });

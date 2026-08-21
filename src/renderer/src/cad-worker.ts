@@ -19,10 +19,17 @@ import type { Vec3 } from "../../shared/vec3";
 
 const ready = initOpenCascade({ locateFile: () => openCascadeWasm }).then(setOC);
 
-/** Tolerance for deciding that a component reaches the block wall. */
-const WALL_TOUCH = 0.1;
+/** OpenCascade comparisons scaled to the generated mold's envelope. */
+const geometryTolerance = (min: SimplePoint, max: SimplePoint): number =>
+  Math.max(...max.map((value, axis) => value - min[axis])) * 1e-6;
+
+/** Boolean results can sit slightly inside an original bounding face. */
+const wallTouchTolerance = (min: SimplePoint, max: SimplePoint): number =>
+  Math.max(...max.map((value, axis) => value - min[axis])) * 1e-3;
+
 /** Thickness used to discover enclosed regions immediately below the seam. */
-const SEAM_SAMPLE = 0.05;
+const seamSampleDepth = (min: SimplePoint, max: SimplePoint): number =>
+  Math.max(...max.map((value, axis) => value - min[axis])) * 1e-3;
 
 /** Splits a shape into its disconnected solid components. */
 function solidsOf(shape: Shape3D): Shape3D[] {
@@ -45,8 +52,10 @@ function solidsOf(shape: Shape3D): Shape3D[] {
 /** A real mold half spans the block; anything landing strictly inside is a core. */
 function reachesWall(shape: Shape3D, min: SimplePoint, max: SimplePoint): boolean {
   const [low, high] = shape.boundingBox.bounds;
+  const tolerance = wallTouchTolerance(min, max);
   return [0, 1].some(
-    (axis) => Math.abs(low[axis] - min[axis]) < WALL_TOUCH || Math.abs(high[axis] - max[axis]) < WALL_TOUCH
+    (axis) =>
+      Math.abs(low[axis] - min[axis]) <= tolerance || Math.abs(high[axis] - max[axis]) <= tolerance
   );
 }
 
@@ -90,6 +99,37 @@ function moveCores(from: Shape3D, to: Shape3D, min: SimplePoint, max: SimplePoin
 }
 
 /**
+ * Finds the lowest upward-facing part surface below an enclosed seam region.
+ * That surface is the floor of the pocket and therefore the end of its core;
+ * using the part's overall lower bound would manufacture a flat cap below the
+ * real curved surface.
+ */
+function pocketFloor(
+  part: Shape3D,
+  region: Shape3D,
+  sampleBottom: number,
+  fallback: number,
+  tolerance: number
+): number {
+  const [regionMin, regionMax] = region.boundingBox.bounds;
+  const faces = part.faces;
+  const floors: number[] = [];
+
+  for (const face of faces) {
+    const [faceMin, faceMax] = face.boundingBox.bounds;
+    const overlapsRegion = [0, 1].every(
+      (axis) => faceMax[axis] >= regionMin[axis] - tolerance && faceMin[axis] <= regionMax[axis] + tolerance
+    );
+    if (!overlapsRegion || faceMin[2] >= sampleBottom - tolerance) continue;
+
+    if (face.normalAt().z > 0.05) floors.push(faceMin[2]);
+  }
+
+  faces.forEach((face) => face.delete());
+  return floors.length > 0 ? Math.min(...floors) : fallback;
+}
+
+/**
  * Gives enclosed regions at the parting line to the half they meet without a
  * gap. A cap can leave its centre connected to the lower block through open
  * space below the part, so disconnected-solid cleanup alone cannot find it.
@@ -106,7 +146,10 @@ function moveSeamCores(
   partBottom: number,
   splitZ: number
 ): [Shape3D, Shape3D] {
-  const sampleBottom = Math.max(min[2], splitZ - SEAM_SAMPLE);
+  const tolerance = geometryTolerance(min, max);
+  const sampleBottom = Math.max(min[2], splitZ - seamSampleDepth(min, max));
+  if (splitZ - sampleBottom <= tolerance) return [lower, upper];
+
   const slab = makeBox([min[0], min[1], sampleBottom], [max[0], max[1], splitZ]).cut(part);
   const regions = solidsOf(slab);
   const enclosed = regions.filter((region) => !reachesWall(region, min, max));
@@ -116,21 +159,24 @@ function moveSeamCores(
   for (const region of enclosed) {
     const faces = region.faces;
     const footprint = faces.find(
-      (face) => face.geomType === "PLANE" && Math.abs(face.center.z - sampleBottom) < SEAM_SAMPLE
+      (face) => face.geomType === "PLANE" && Math.abs(face.center.z - sampleBottom) <= tolerance
     );
     if (!footprint) {
       faces.forEach((face) => face.delete());
       continue;
     }
 
-    // Stop at the part's underside. Reaching the block floor would let a
-    // through-hole in the part tether the base material to the pocket fill, and
-    // the whole base would be dragged into the upper half with it.
-    const projection = basicFaceExtrusion(footprint, new Vector([0, 0, partBottom - sampleBottom]));
+    // Stop on the actual pocket surface. Extending to the part's overall lower
+    // bound would flatten a curved pocket and can pull exterior mold material
+    // through a hole in the part into the upper half.
+    const coreBottom = pocketFloor(part, region, sampleBottom, partBottom, tolerance);
+    const projection = basicFaceExtrusion(footprint, new Vector([0, 0, coreBottom - sampleBottom]));
     faces.forEach((face) => face.delete());
     const withinFootprint = nextLower.intersect(projection);
     const candidates = solidsOf(withinFootprint);
-    const cores = candidates.filter((candidate) => candidate.boundingBox.bounds[1][2] >= splitZ - WALL_TOUCH);
+    const cores = candidates.filter(
+      (candidate) => candidate.boundingBox.bounds[1][2] >= sampleBottom - tolerance
+    );
 
     for (const core of cores) {
       nextLower = replace(nextLower, nextLower.cut(core));

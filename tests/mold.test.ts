@@ -36,14 +36,16 @@ describe("RTV mold plan", () => {
     expect(mold.splitZ).toBeLessThanOrEqual(max[2]);
   });
 
-  it("uses the lower face when a widest flange has two coplanar edges", () => {
+  it.each([1e-4, 1, 1e4])("uses the lower face of a tied widest flange at scale %s", (scale) => {
     const points = [
-      [10, 0, 2],
-      [10, 0, 3],
-      [0, 5, 4]
+      [10 * scale, 0, 2 * scale],
+      [10 * scale, 0, 3 * scale],
+      [0, 5 * scale, 4 * scale]
     ] satisfies [number, number, number][];
 
-    expect(partingHeight(points, [-10, -10, 0], [10, 10, 5])).toBe(2);
+    expect(
+      partingHeight(points, [-10 * scale, -10 * scale, 0], [10 * scale, 10 * scale, 5 * scale])
+    ).toBe(2 * scale);
   });
 
   it("plans one injection gate, air vents, and four screw holes", () => {
