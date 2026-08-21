@@ -22,8 +22,9 @@ const EXPLODE_TRAVEL = 0.6;
 const CLICK_SLOP = 4;
 
 const STYLES: Record<SceneObjectId, { colour: number; edge: number; metalness: number; roughness: number }> = {
-  // Black cast part; its edge overlay is light so it still reads against the body.
-  part: { colour: 0x000000, edge: 0x9aa3ad, metalness: 0.12, roughness: 0.38 },
+  // Matte black cast part. The edge overlay matches the body so no wireframe
+  // shows on it, and roughness 0.9 keeps the surface flat rather than glossy.
+  part: { colour: 0x101010, edge: 0x101010, metalness: 0, roughness: 0.9 },
   lower: { colour: 0x4fa6d8, edge: 0x164e78, metalness: 0, roughness: 0.3 },
   upper: { colour: 0x7bc8ee, edge: 0x164e78, metalness: 0, roughness: 0.3 }
 };
