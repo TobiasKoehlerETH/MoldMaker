@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import type { CadMesh, CadPreview } from "../../../shared/cad";
+import type { Vec3 } from "../../../shared/vec3";
 import {
   OBJECT_ORDER,
   OPACITY,
@@ -12,12 +13,20 @@ import {
 
 interface ViewportProps {
   preview: CadPreview | null;
+  /** Envelope and port lines drawn while the solids catch up with the settings. */
+  plan: Vec3[][] | null;
   view: ViewState;
   onSelect(selection: BodySelection | null): void;
 }
 
-/** Fraction of the mold height the halves separate by at full explode. */
-const EXPLODE_TRAVEL = 0.6;
+/**
+ * Separation at full explode, as a fraction of the mold's largest dimension.
+ *
+ * Measuring the largest dimension rather than the height keeps the gap in
+ * proportion to what is on screen: a wide, shallow tool is the common case, and
+ * scaling its gap by its own height barely parted the halves at all.
+ */
+const EXPLODE_TRAVEL = 0.45;
 /** Pointer travel below which a press counts as a click rather than an orbit. */
 const CLICK_SLOP = 4;
 
@@ -37,7 +46,18 @@ const geometry = (mesh: CadMesh): THREE.BufferGeometry => {
   return result;
 };
 
-const dispose = (group: THREE.Group): void => {
+/** Line segments for a set of polylines, as one geometry. */
+const polylines = (lines: Vec3[][]): THREE.BufferGeometry => {
+  const positions: number[] = [];
+  for (const line of lines) {
+    for (let index = 1; index < line.length; index += 1) positions.push(...line[index - 1], ...line[index]);
+  }
+  const result = new THREE.BufferGeometry();
+  result.setAttribute("position", new THREE.BufferAttribute(new Float32Array(positions), 3));
+  return result;
+};
+
+const dispose = (group: THREE.Object3D): void => {
   group.traverse((object) => {
     if (!(object instanceof THREE.Mesh || object instanceof THREE.LineSegments)) return;
     object.geometry.dispose();
@@ -46,16 +66,25 @@ const dispose = (group: THREE.Group): void => {
   });
 };
 
-export function Viewport({ preview, view, onSelect }: ViewportProps) {
+/** Separates the halves about the parting plane, leaving the part in the gap. */
+const applyExplode = (group: THREE.Group, travel: number, explode: number): void => {
+  const shift = (travel * explode) / 2;
+  group.getObjectByName("lower")?.position.setZ(-shift);
+  group.getObjectByName("upper")?.position.setZ(shift);
+};
+
+export function Viewport({ preview, plan, view, onSelect }: ViewportProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
   const modelRef = useRef<THREE.Group | null>(null);
+  const planRef = useRef<THREE.LineSegments | null>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const controlsRef = useRef<OrbitControls | null>(null);
-  const gridRef = useRef<THREE.GridHelper | null>(null);
+  const frameRef = useRef<(object: THREE.Object3D) => void>(() => undefined);
   const fitRef = useRef<() => void>(() => undefined);
   const invalidateRef = useRef<() => void>(() => undefined);
   const explodeTravelRef = useRef(0);
+  const pendingFitRef = useRef(false);
   const pressRef = useRef<[number, number] | null>(null);
 
   useEffect(() => {
@@ -89,7 +118,6 @@ export function Viewport({ preview, view, onSelect }: ViewportProps) {
     grid.material.transparent = true;
     grid.material.opacity = 0.22;
     scene.add(grid, new THREE.HemisphereLight(0xffffff, 0x52606d, 2.1));
-    gridRef.current = grid;
     const key = new THREE.DirectionalLight(0xffffff, 3.4);
     key.position.set(70, -90, 120);
     const fill = new THREE.DirectionalLight(0xbfd8ff, 1.4);
@@ -109,6 +137,30 @@ export function Viewport({ preview, view, onSelect }: ViewportProps) {
     };
     invalidateRef.current = invalidate;
     controls.addEventListener("change", invalidate);
+
+    /** Frames an object and parks the grid just under it. */
+    frameRef.current = (object) => {
+      const box = new THREE.Box3().setFromObject(object);
+      if (box.isEmpty()) return;
+      const center = box.getCenter(new THREE.Vector3());
+      const size = box.getSize(new THREE.Vector3());
+      const radius = size.length() / 2;
+      // Pull back far enough for the bounding sphere to fit the narrower of the
+      // two field of views, so nothing is cropped — separated halves included.
+      const vertical = THREE.MathUtils.degToRad(camera.fov) / 2;
+      const horizontal = Math.atan(Math.tan(vertical) * camera.aspect);
+      const distance = (radius / Math.sin(Math.min(vertical, horizontal))) * 1.05;
+      grid.position.z = box.min.z - size.z * 0.08;
+      controls.target.copy(center);
+      camera.position
+        .copy(center)
+        .add(new THREE.Vector3(1.25, -1.45, 1.05).normalize().multiplyScalar(distance));
+      camera.near = Math.max(radius / 500, 0.01);
+      camera.far = Math.max(radius * 50, 1000);
+      camera.updateProjectionMatrix();
+      controls.update();
+      invalidate();
+    };
 
     let width = 0;
     let height = 0;
@@ -138,15 +190,17 @@ export function Viewport({ preview, view, onSelect }: ViewportProps) {
       controls.removeEventListener("change", invalidate);
       controls.dispose();
       if (modelRef.current) dispose(modelRef.current);
+      if (planRef.current) dispose(planRef.current);
       grid.geometry.dispose();
       const gridMaterials = Array.isArray(grid.material) ? grid.material : [grid.material];
       gridMaterials.forEach((material) => material.dispose());
       renderer.dispose();
+      frameRef.current = () => undefined;
       sceneRef.current = null;
       cameraRef.current = null;
       controlsRef.current = null;
-      gridRef.current = null;
       modelRef.current = null;
+      planRef.current = null;
     };
   }, []);
 
@@ -155,6 +209,10 @@ export function Viewport({ preview, view, onSelect }: ViewportProps) {
     const camera = cameraRef.current;
     const controls = controlsRef.current;
     if (!scene || !camera || !controls) return;
+    // A settings change rebuilds the solids for a part already on screen. Only
+    // the first model of a part earns a camera move; re-framing on every
+    // rebuild would throw away the view the user had set up.
+    const isFirstModel = modelRef.current === null;
     if (modelRef.current) {
       scene.remove(modelRef.current);
       dispose(modelRef.current);
@@ -202,27 +260,46 @@ export function Viewport({ preview, view, onSelect }: ViewportProps) {
 
     scene.add(group);
     modelRef.current = group;
-    const initialBox = new THREE.Box3().setFromObject(group);
-    explodeTravelRef.current = initialBox.getSize(new THREE.Vector3()).z * EXPLODE_TRAVEL;
-    fitRef.current = () => {
-      const box = new THREE.Box3().setFromObject(group);
-      const center = box.getCenter(new THREE.Vector3());
-      const size = box.getSize(new THREE.Vector3());
-      const radius = size.length() / 2;
-      if (gridRef.current) gridRef.current.position.z = box.min.z - size.z * 0.08;
-      controls.target.copy(center);
-      camera.position.copy(center).add(new THREE.Vector3(radius * 1.25, -radius * 1.45, radius * 1.05));
-      camera.near = Math.max(radius / 500, 0.01);
-      camera.far = Math.max(radius * 50, 1000);
-      camera.updateProjectionMatrix();
-      controls.update();
-      invalidateRef.current();
-    };
-    fitRef.current();
+    const size = new THREE.Box3().setFromObject(group).getSize(new THREE.Vector3());
+    explodeTravelRef.current = Math.max(size.x, size.y, size.z) * EXPLODE_TRAVEL;
+    fitRef.current = () => frameRef.current(group);
+    // Fitting waits for the presentation pass below, which runs before this
+    // commit paints, so the camera frames the model as it is actually shown —
+    // exploded halves included.
+    pendingFitRef.current = isFirstModel;
+    invalidateRef.current();
   }, [preview]);
 
-  // Visibility, edges, and explode are presentation-only changes. Updating the
-  // existing objects avoids reallocating and re-uploading every mesh buffer.
+  // The plan is pure geometry from the parameters, so it redraws the moment a
+  // setting changes and shows where the rebuilt solids are heading.
+  useEffect(() => {
+    const scene = sceneRef.current;
+    if (!scene) return;
+    if (planRef.current) {
+      scene.remove(planRef.current);
+      dispose(planRef.current);
+      planRef.current = null;
+    }
+    if (plan) {
+      const lines = new THREE.LineSegments(
+        polylines(plan),
+        new THREE.LineBasicMaterial({ color: 0x1d6fa5, transparent: true, opacity: 0.6, depthTest: false })
+      );
+      lines.renderOrder = 20;
+      scene.add(lines);
+      planRef.current = lines;
+      // Nothing has been built yet on a fresh import, so the plan is all there
+      // is to look at: frame it, and hand double-click the same target.
+      if (!modelRef.current) {
+        fitRef.current = () => frameRef.current(lines);
+        fitRef.current();
+      }
+    }
+    invalidateRef.current();
+  }, [plan]);
+
+  // Visibility and explode are presentation-only changes. Updating the existing
+  // objects avoids reallocating and re-uploading every mesh buffer.
   useEffect(() => {
     const group = modelRef.current;
     if (!group || !preview) return;
@@ -244,15 +321,18 @@ export function Viewport({ preview, view, onSelect }: ViewportProps) {
         | THREE.LineSegments<THREE.BufferGeometry, THREE.LineBasicMaterial>
         | undefined;
       if (lines) {
-        lines.visible = view.showEdges && opacity > 0;
+        lines.visible = opacity > 0;
         lines.material.opacity = transparent ? 0.75 : 0.95;
+        lines.material.transparent = transparent;
         lines.material.depthTest = !transparent;
       }
     }
 
-    const shift = (explodeTravelRef.current * view.explode) / 2;
-    group.getObjectByName("lower")?.position.setZ(-shift);
-    group.getObjectByName("upper")?.position.setZ(shift);
+    applyExplode(group, explodeTravelRef.current, view.explode);
+    if (pendingFitRef.current) {
+      pendingFitRef.current = false;
+      fitRef.current();
+    }
     invalidateRef.current();
   }, [preview, view]);
 

@@ -1,29 +1,20 @@
-import { Blend, Box, PanelBottomOpen, PanelLeftClose, PanelTopOpen, ScanLine, type LucideIcon } from "lucide-react";
+import { useState } from "react";
+import { Crosshair, Eye, EyeOff, Minimize2, PanelLeftClose, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
   SidebarContent,
   SidebarGroup,
+  SidebarGroupAction,
   SidebarGroupContent,
   SidebarGroupLabel,
   SidebarHeader,
   SidebarSeparator
 } from "@/components/ui/sidebar";
 import { Slider } from "@/components/ui/slider";
-import { Toggle } from "@/components/ui/toggle";
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import {
-  matchesMode,
-  MODE_ORDER,
-  OBJECT_LABELS,
-  OBJECT_ORDER,
-  SHADING_MODES,
-  type SceneObjectId,
-  type ShadingMode,
-  type ViewState
-} from "@/viewport/modes";
-import type { Mold, MoldParams } from "../../../shared/mold";
+import { OBJECT_LABELS, OBJECT_ORDER, type SceneObjectId, type ViewState } from "@/viewport/modes";
+import { MAX_PADDING, type Mold, type MoldParams } from "../../../shared/mold";
 
 interface InspectorProps {
   section: "mold" | "view";
@@ -32,67 +23,255 @@ interface InspectorProps {
   view: ViewState;
   onChange(patch: Partial<MoldParams>): void;
   onViewChange(patch: Partial<ViewState>): void;
-  onCycleObject(id: SceneObjectId): void;
+  onToggleObject(id: SceneObjectId): void;
   onCollapse(): void;
+}
+
+interface FieldProps {
+  id: string;
+  label: string;
+  /** Accessible name, when the visible label only reads in context. */
+  name?: string;
+  value: number;
+  step: number;
+  min: number;
+  max: number;
+  unit: string;
+  onChange(value: number): void;
+}
+
+/** What is currently typed, and the value it was typed against. */
+interface Draft {
+  text: string;
+  base: number;
 }
 
 const FIELDS = [
   { key: "wallThickness", label: "Wall", step: 0.5, min: 3, max: 30, unit: "mm" },
   { key: "injectionDiameter", label: "Syringe port", step: 0.1, min: 1, max: 10, unit: "mm" },
   { key: "ventDiameter", label: "Air vents", step: 0.1, min: 0.2, max: 2, unit: "mm" },
-  { key: "shrinkagePercent", label: "Scale compensation", step: 0.1, min: 0, max: 5, unit: "%" }
+  { key: "screwDiameter", label: "Mounting holes", step: 0.1, min: 1.5, max: 12, unit: "mm" }
 ] as const;
 
-const MODE_ICONS: Record<ShadingMode, LucideIcon> = {
-  solid: Box,
-  transparent: Blend,
-  "ghost-upper": PanelTopOpen,
-  "ghost-lower": PanelBottomOpen
-};
+const AXES = ["X", "Y", "Z"] as const;
 
 const format = (value: number): string => Number(value.toFixed(3)).toString();
 
+const clamp = (value: number, min: number, max: number): number => Math.min(max, Math.max(min, value));
+
+/** A millimetre setting, typed in directly. */
+function NumberField({ id, label, name = label, value, step, min, max, unit, onChange }: FieldProps) {
+  const [draft, setDraft] = useState<Draft | null>(null);
+  // The draft holds only while it describes the value it was typed against. A
+  // change from anywhere else — a reloaded project, a wall that moved the block
+  // minimum — wins, and the field snaps back to the real setting.
+  const text = draft?.base === value ? draft.text : format(value);
+
+  /**
+   * Commits anything in range as it is typed, and holds anything else as text.
+   *
+   * Clamping every keystroke made values below the minimum impossible to type:
+   * on a field that starts at 3, the "1" of "12" became a "3" on the way in.
+   */
+  function edit(raw: string, parsed: number): void {
+    if (Number.isFinite(parsed) && parsed >= min && parsed <= max) {
+      setDraft({ text: raw, base: parsed });
+      onChange(parsed);
+      return;
+    }
+    setDraft({ text: raw, base: value });
+  }
+
+  /** Leaving the field settles whatever is left over: clamped, or discarded. */
+  function settle(): void {
+    if (!draft) return;
+    setDraft(null);
+    const parsed = draft.text.trim() === "" ? Number.NaN : Number(draft.text);
+    if (Number.isFinite(parsed) && clamp(parsed, min, max) !== value) onChange(clamp(parsed, min, max));
+  }
+
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <Label htmlFor={`setting-${id}`} className="text-xs text-sidebar-foreground/75">
+        {label}
+      </Label>
+      <div className="flex items-center gap-1.5">
+        <Input
+          id={`setting-${id}`}
+          aria-label={name}
+          type="number"
+          inputMode="decimal"
+          className="h-7 w-20 appearance-none px-2 text-right text-xs tabular-nums [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+          value={text}
+          step={step}
+          min={min}
+          max={max}
+          onChange={(event) => edit(event.currentTarget.value, event.currentTarget.valueAsNumber)}
+          onBlur={settle}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") event.currentTarget.blur();
+          }}
+        />
+        <span className="w-5 text-[10px] text-sidebar-foreground/55">{unit}</span>
+      </div>
+    </div>
+  );
+}
+
 function MoldPanel({ params, mold, onChange }: Pick<InspectorProps, "params" | "mold" | "onChange">) {
+  const padded = params.padding.some((value) => value > 0);
+  const moved = params.gateOffset.some((value) => value !== 0);
+
   return (
     <>
       <SidebarGroup>
         <SidebarGroupLabel>RTV tool</SidebarGroupLabel>
-        <SidebarGroupContent className="space-y-4 px-2 pb-2">
+        <SidebarGroupContent className="space-y-2 px-2 pb-2">
           {FIELDS.map(({ key, label, step, min, max, unit }) => (
-            <div className="space-y-2" key={key}>
-              <div className="flex items-center justify-between gap-3">
-                <Label htmlFor={`setting-${key}`} className="text-xs text-sidebar-foreground/75">
-                  {label}
+            <NumberField
+              key={key}
+              id={key}
+              label={label}
+              value={params[key]}
+              step={step}
+              min={min}
+              max={max}
+              unit={unit}
+              onChange={(value) => onChange({ [key]: value })}
+            />
+          ))}
+        </SidebarGroupContent>
+      </SidebarGroup>
+
+      <SidebarSeparator />
+
+      {/* Outer block size. The wall sets the smallest block that still encloses
+          the part, so these only ever grow it — typing an axis down to its
+          minimum hands it back to the wall. */}
+      <SidebarGroup>
+        <SidebarGroupLabel>Block size</SidebarGroupLabel>
+        <SidebarGroupAction
+          aria-label="Shrink block to the wall"
+          title="Shrink block to the wall"
+          disabled={!padded}
+          className="disabled:opacity-40"
+          onClick={() => onChange({ padding: [0, 0, 0] })}
+        >
+          <Minimize2 />
+        </SidebarGroupAction>
+        <SidebarGroupContent className="space-y-2 px-2 pb-2">
+          {mold ? (
+            AXES.map((axis, index) => (
+              <NumberField
+                key={axis}
+                id={`size-${axis}`}
+                label={axis}
+                name={`Block ${axis}`}
+                value={mold.size[index]}
+                step={0.5}
+                min={mold.minSize[index]}
+                max={mold.minSize[index] + MAX_PADDING}
+                unit="mm"
+                onChange={(value) => {
+                  const padding = [...params.padding] as MoldParams["padding"];
+                  padding[index] = Math.max(0, value - mold.minSize[index]);
+                  onChange({ padding });
+                }}
+              />
+            ))
+          ) : (
+            <p className="text-xs text-sidebar-foreground/55">Import a part to size the block.</p>
+          )}
+        </SidebarGroupContent>
+      </SidebarGroup>
+
+      <SidebarSeparator />
+
+      {/* The channel is drilled straight down onto the part, so the port lands
+          on the topmost surface under wherever these put it. */}
+      <SidebarGroup>
+        <SidebarGroupLabel>Port position</SidebarGroupLabel>
+        <SidebarGroupAction
+          aria-label="Centre port"
+          title="Centre port"
+          disabled={!moved}
+          className="disabled:opacity-40"
+          onClick={() => onChange({ gateOffset: [0, 0] })}
+        >
+          <Crosshair />
+        </SidebarGroupAction>
+        <SidebarGroupContent className="space-y-2 px-2 pb-2">
+          {mold ? (
+            <>
+              {AXES.slice(0, 2).map((axis, index) => (
+                <NumberField
+                  key={axis}
+                  id={`port-${axis}`}
+                  label={axis}
+                  name={`Port ${axis}`}
+                  value={params.gateOffset[index]}
+                  step={0.5}
+                  min={-mold.gateRange[index]}
+                  max={mold.gateRange[index]}
+                  unit="mm"
+                  onChange={(value) => {
+                    const gateOffset = [...params.gateOffset] as MoldParams["gateOffset"];
+                    gateOffset[index] = value;
+                    onChange({ gateOffset });
+                  }}
+                />
+              ))}
+              <div className="flex justify-between gap-3 pt-1 text-xs text-sidebar-foreground/65">
+                <span>Meets part at</span>
+                <span className="text-right tabular-nums text-sidebar-foreground">
+                  {mold.gate.map(format).join(" · ")} mm
+                </span>
+              </div>
+            </>
+          ) : (
+            <p className="text-xs text-sidebar-foreground/55">Import a part to move the port.</p>
+          )}
+        </SidebarGroupContent>
+      </SidebarGroup>
+
+      <SidebarSeparator />
+
+      {/* Sliding the seam is a search for the height that draws cleanly, so it
+          is worth scrubbing rather than typing. */}
+      <SidebarGroup>
+        <SidebarGroupLabel>Parting line</SidebarGroupLabel>
+        <SidebarGroupAction
+          aria-label="Automatic parting line"
+          title="Automatic parting line"
+          disabled={params.splitOffset === 0}
+          className="disabled:opacity-40"
+          onClick={() => onChange({ splitOffset: 0 })}
+        >
+          <RotateCcw />
+        </SidebarGroupAction>
+        <SidebarGroupContent className="space-y-3 px-2 pb-2">
+          {mold ? (
+            <>
+              <div className="flex items-center justify-between gap-3 text-xs">
+                <Label className="text-sidebar-foreground/75">
+                  {["X", "Y", "Z"][mold.splitAxis]} height
                 </Label>
-                <div className="flex items-center gap-1.5">
-                  <Input
-                    id={`setting-${key}`}
-                    aria-label={label}
-                    type="number"
-                    inputMode="decimal"
-                    className="h-7 w-16 appearance-none px-2 text-right text-xs tabular-nums [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-                    value={format(params[key])}
-                    step={step}
-                    min={min}
-                    max={max}
-                    onChange={(event) => {
-                      const value = event.currentTarget.valueAsNumber;
-                      if (Number.isFinite(value)) onChange({ [key]: Math.min(max, Math.max(min, value)) });
-                    }}
-                  />
-                  <span className="w-5 text-[10px] text-sidebar-foreground/55">{unit}</span>
-                </div>
+                <span className="tabular-nums text-sidebar-foreground">
+                  {format(mold.splitZ)} mm{params.splitOffset === 0 ? " · auto" : ""}
+                </span>
               </div>
               <Slider
-                aria-label={`${label} slider`}
-                value={[params[key]]}
-                step={step}
-                min={min}
-                max={max}
-                onValueChange={([value]) => onChange({ [key]: value })}
+                aria-label="Parting line"
+                value={[clamp(params.splitOffset, mold.splitRange[0], mold.splitRange[1])]}
+                min={mold.splitRange[0]}
+                max={mold.splitRange[1]}
+                step={0.1}
+                onValueChange={([value]) => onChange({ splitOffset: value })}
               />
-            </div>
-          ))}
+            </>
+          ) : (
+            <p className="text-xs text-sidebar-foreground/55">Import a part to move the seam.</p>
+          )}
         </SidebarGroupContent>
       </SidebarGroup>
 
@@ -107,7 +286,9 @@ function MoldPanel({ params, mold, onChange }: Pick<InspectorProps, "params" | "
           </div>
           <div className="flex justify-between text-sidebar-foreground/65">
             <span>Split</span>
-            <span className="text-sidebar-foreground">{mold ? ["X", "Y", "Z"][mold.splitAxis] : "—"} · auto</span>
+            <span className="text-sidebar-foreground">
+              {mold ? ["X", "Y", "Z"][mold.splitAxis] : "—"} · {params.splitOffset === 0 ? "auto" : "manual"}
+            </span>
           </div>
           <div className="flex justify-between text-sidebar-foreground/65">
             <span>Flow</span>
@@ -119,50 +300,37 @@ function MoldPanel({ params, mold, onChange }: Pick<InspectorProps, "params" | "
   );
 }
 
-function ViewPanel({ view, onViewChange, onCycleObject }: Pick<InspectorProps, "view" | "onViewChange" | "onCycleObject">) {
-  const mode = MODE_ORDER.find((candidate) => matchesMode(view, candidate));
+function ViewPanel({ view, onViewChange, onToggleObject }: Pick<InspectorProps, "view" | "onViewChange" | "onToggleObject">) {
   return (
     <>
       <SidebarGroup>
-        <SidebarGroupLabel>Shading</SidebarGroupLabel>
-        <SidebarGroupContent className="flex items-center gap-2 px-2">
-          <ToggleGroup
-            type="single"
-            variant="outline"
-            size="sm"
-            value={mode}
-            onValueChange={(value) => {
-              if (value) onViewChange({ objects: { ...SHADING_MODES[value as ShadingMode].objects } });
-            }}
-          >
-            {MODE_ORDER.map((preset) => {
-              const Icon = MODE_ICONS[preset];
-              return (
-                <ToggleGroupItem key={preset} value={preset} aria-label={SHADING_MODES[preset].label} title={SHADING_MODES[preset].label}>
-                  <Icon />
-                </ToggleGroupItem>
-              );
-            })}
-          </ToggleGroup>
-          <Toggle variant="outline" size="sm" pressed={view.showEdges} onPressedChange={(pressed) => onViewChange({ showEdges: pressed })} aria-label="Show all edges" title="Show all edges">
-            <ScanLine />
-          </Toggle>
-        </SidebarGroupContent>
-      </SidebarGroup>
-
-      <SidebarSeparator />
-
-      <SidebarGroup>
         <SidebarGroupLabel>Objects</SidebarGroupLabel>
         <SidebarGroupContent className="space-y-1 px-1">
-          {OBJECT_ORDER.map((id) => (
-            <div className="flex h-8 items-center justify-between rounded-md px-2 text-xs" key={id}>
-              <span className="text-sidebar-foreground/70">{OBJECT_LABELS[id]}</span>
-              <Button variant="ghost" size="sm" className="h-7 capitalize" aria-label={`${OBJECT_LABELS[id]} visibility`} onClick={() => onCycleObject(id)}>
-                {view.objects[id]}
-              </Button>
-            </div>
-          ))}
+          {OBJECT_ORDER.map((id) => {
+            const visibility = view.objects[id];
+            const shown = visibility !== "hidden";
+            const name = OBJECT_LABELS[id].toLowerCase();
+            return (
+              <div className="flex h-8 items-center justify-between rounded-md px-2 text-xs" key={id}>
+                <span className={shown ? "text-sidebar-foreground" : "text-sidebar-foreground/40"}>
+                  {OBJECT_LABELS[id]}
+                </span>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="size-7"
+                  aria-label={`${OBJECT_LABELS[id]} visibility`}
+                  aria-pressed={shown}
+                  title={shown ? `Hide ${name}` : `Show ${name}`}
+                  onClick={() => onToggleObject(id)}
+                >
+                  {/* A half-lit eye is the transparent state, set from the
+                      viewport; the eye itself only ever shows or hides. */}
+                  {shown ? <Eye className={visibility === "ghost" ? "opacity-45" : undefined} /> : <EyeOff className="opacity-50" />}
+                </Button>
+              </div>
+            );
+          })}
         </SidebarGroupContent>
       </SidebarGroup>
 

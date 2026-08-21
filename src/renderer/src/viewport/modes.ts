@@ -1,9 +1,11 @@
 /** The three things drawn in the preview, each with its own visibility. */
 export type SceneObjectId = "part" | "lower" | "upper";
 
+/** Solid by default; `ghost` is the see-through state for looking inside. */
 export type Visibility = "solid" | "ghost" | "hidden";
 
-export const OBJECT_ORDER: SceneObjectId[] = ["part", "lower", "upper"];
+/** Listed the way the tool stacks: top half, the part it casts, base half. */
+export const OBJECT_ORDER: SceneObjectId[] = ["upper", "part", "lower"];
 
 export const OBJECT_LABELS: Record<SceneObjectId, string> = {
   part: "Cast part",
@@ -30,43 +32,13 @@ export interface BodySelection {
   y: number;
 }
 
-/** The sidebar rows step an object through these in order. */
-export const NEXT_VISIBILITY: Record<Visibility, Visibility> = {
-  solid: "ghost",
-  ghost: "hidden",
-  hidden: "solid"
-};
-
-export type ShadingMode = "solid" | "transparent" | "ghost-upper" | "ghost-lower";
-
-interface ShadingPreset {
-  label: string;
-  objects: Record<SceneObjectId, Visibility>;
-}
-
-/** Presets set every object at once; clicking a single object refines from there. */
-export const SHADING_MODES: Record<ShadingMode, ShadingPreset> = {
-  solid: { label: "Solid mold", objects: { part: "solid", lower: "solid", upper: "solid" } },
-  transparent: { label: "Transparent mold", objects: { part: "solid", lower: "ghost", upper: "ghost" } },
-  "ghost-upper": { label: "Ghost top half", objects: { part: "solid", lower: "solid", upper: "ghost" } },
-  "ghost-lower": { label: "Ghost base half", objects: { part: "solid", lower: "ghost", upper: "solid" } }
-};
-
-export const MODE_ORDER = Object.keys(SHADING_MODES) as ShadingMode[];
-
 export interface ViewState {
   objects: Record<SceneObjectId, Visibility>;
-  /** Separation of the halves, as a fraction of the mold height. */
+  /** Separation of the halves, as a fraction of the mold's largest dimension. */
   explode: number;
-  showEdges: boolean;
 }
 
 export const DEFAULT_VIEW: ViewState = {
-  objects: { ...SHADING_MODES.transparent.objects },
-  explode: 1,
-  showEdges: true
+  objects: { part: "solid", lower: "solid", upper: "solid" },
+  explode: 1
 };
-
-/** True when the current visibilities match a preset exactly, so it can be shown as active. */
-export const matchesMode = (view: ViewState, mode: ShadingMode): boolean =>
-  OBJECT_ORDER.every((id) => view.objects[id] === SHADING_MODES[mode].objects[id]);

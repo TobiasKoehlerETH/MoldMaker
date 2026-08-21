@@ -30,7 +30,7 @@ test("launches a minimal workspace with the nested sidebar rail", async ({ appPa
 });
 
 test("imports, edits, saves, reloads, and exports a mold", async ({ electronApp, appPage }, testInfo) => {
-  test.setTimeout(120_000);
+  test.setTimeout(180_000);
   const workDir = testInfo.outputPath("native-files");
   const projectPath = path.join(workDir, "sample.moldmaker");
   const exportDir = path.join(workDir, "export");
@@ -50,26 +50,62 @@ test("imports, edits, saves, reloads, and exports a mold", async ({ electronApp,
   await wall.fill("7");
   await expect(wall).toHaveValue("7");
   await expect(appPage.getByRole("button", { name: "Export mold" })).toBeDisabled();
+
+  // The block grows past the wall and the syringe port moves off centre. The
+  // model on screen is never torn down for a rebuild, so the viewport keeps
+  // showing the previous solids until the new ones land.
+  const blockX = appPage.getByRole("spinbutton", { name: "Block X" });
+  const width = await blockX.inputValue();
+  await blockX.fill(String(Number(width) + 4));
+  const portX = appPage.getByRole("spinbutton", { name: "Port X" });
+  await portX.fill("5");
+  await expect(appPage.getByLabel("3D model viewport")).toBeVisible();
   await expect(appPage.getByRole("button", { name: "Export mold" })).toBeEnabled({ timeout: 60_000 });
+  await expect(blockX).not.toHaveValue(width);
   await capture(appPage, "workspace-imported", testInfo);
+
+  // The seam scrubs off the automatic height and the reset puts it back.
+  const parting = appPage.getByRole("slider", { name: "Parting line" });
+  await expect(parting).toHaveAttribute("aria-valuenow", "0");
+  await parting.press("ArrowUp");
+  await expect(parting).not.toHaveAttribute("aria-valuenow", "0");
+  await appPage.getByRole("button", { name: "Automatic parting line" }).click();
+  await expect(parting).toHaveAttribute("aria-valuenow", "0");
+  await expect(appPage.getByRole("button", { name: "Export mold" })).toBeEnabled({ timeout: 60_000 });
 
   await appPage.getByRole("button", { name: "View settings" }).click();
   await expect(appPage.getByRole("complementary", { name: "View settings" })).toBeVisible();
-  await expect(appPage.getByRole("radio", { name: "Transparent mold" })).toBeVisible();
-  await expect(appPage.getByRole("button", { name: "Show all edges" })).toBeVisible();
 
-  await appPage.getByRole("radio", { name: "Ghost top half" }).click();
-  await expect(appPage.getByRole("radio", { name: "Ghost top half" })).toBeChecked();
+  // One eye per body and one explode slider: nothing else to get wrong.
+  const topHalf = appPage.getByRole("button", { name: "Top half visibility" });
+  await expect(topHalf).toHaveAttribute("aria-pressed", "true");
+  await topHalf.click();
+  await expect(topHalf).toHaveAttribute("aria-pressed", "false");
+  await topHalf.click();
+  await expect(topHalf).toHaveAttribute("aria-pressed", "true");
   const explode = appPage.getByRole("slider").last();
   await expect(explode).toHaveAttribute("aria-valuenow", "1");
   await explode.focus();
   await explode.press("Home");
   for (let step = 0; step < 30; step += 1) await explode.press("ArrowRight");
   await expect(explode).toHaveAttribute("aria-valuenow", "0.6");
-  await appPage.getByRole("button", { name: "Show all edges" }).click();
-  await expect(appPage.getByRole("button", { name: "Show all edges" })).toHaveAttribute("aria-pressed", "false");
-  await appPage.getByRole("button", { name: "Show all edges" }).click();
   await capture(appPage, "workspace-exploded", testInfo);
+
+  // Clicking a body in the viewport still offers every state, transparency
+  // included; the sidebar eye only shows and hides.
+  const canvas = appPage.getByLabel("3D model viewport");
+  const box = (await canvas.boundingBox()) ?? { width: 0, height: 0 };
+  const onBaseHalf = { x: box.width * 0.5, y: box.height * 0.78 };
+  const menu = appPage.getByRole("group", { name: "Base half visibility" });
+
+  await canvas.click({ position: onBaseHalf });
+  await expect(menu).toBeVisible();
+  await menu.getByRole("button", { name: "Transparent" }).click();
+  await expect(menu).toBeHidden();
+
+  await canvas.click({ position: onBaseHalf });
+  await menu.getByRole("button", { name: "Solid" }).click();
+  await expect(menu).toBeHidden();
 
   await appPage.getByRole("button", { name: "Mold settings" }).click();
   await expect(appPage.getByRole("complementary", { name: "Mold settings" })).toBeVisible();
@@ -82,6 +118,7 @@ test("imports, edits, saves, reloads, and exports a mold", async ({ electronApp,
   await selectOpenPath(electronApp, projectPath);
   await appPage.getByRole("button", { name: "Open project" }).click();
   await expect(wall).toHaveValue("7");
+  await expect(portX).toHaveValue("5");
   await expect(appPage.getByRole("button", { name: "Export mold" })).toBeEnabled({ timeout: 60_000 });
 
   await selectOpenPath(electronApp, exportDir);
@@ -113,10 +150,13 @@ test("imports, edits, saves, reloads, and exports a mold", async ({ electronApp,
   }
   const [lowerBottom, lowerTop] = stlZBounds(stls[0]);
   const [upperBottom] = stlZBounds(stls[1]);
-  // The top half owns the pocket core, but it must stop on the sample's actual
-  // pocket floor. Projecting it to the part's lower bound manufactures a broad
-  // flat face exactly 7 mm above the bottom of this mold.
+  // The top half owns the pocket core, and it must stop on the sample's actual
+  // pocket floor: 1.0 mm above the part's lower bound, so 8 mm above the bottom
+  // of this 7 mm-walled mold. The near misses are the informative ones — 7 mm
+  // means the core was projected to the part's overall lower bound and
+  // flattened the curve, 7.5 mm means the part's second solid never got cut and
+  // its lower half is still standing inside the cavity.
   expect(upperBottom).toBeLessThan(lowerTop - 1);
-  expect(upperBottom).toBeGreaterThan(lowerBottom + 7.25);
-  expect(upperBottom).toBeLessThan(lowerBottom + 7.75);
+  expect(upperBottom).toBeGreaterThan(lowerBottom + 7.75);
+  expect(upperBottom).toBeLessThan(lowerBottom + 8.25);
 });

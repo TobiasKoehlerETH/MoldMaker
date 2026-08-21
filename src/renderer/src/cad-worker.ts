@@ -14,7 +14,7 @@ import {
   Vector
 } from "replicad";
 import type { CadMesh, GenerateMoldRequest, GenerateMoldResponse, GeneratedMold } from "../../shared/cad";
-import { flowPorts, partingHeight, screwPoints } from "../../shared/mold";
+import { flowPorts, moldBounds, partingLevel, screwPoints } from "../../shared/mold";
 import type { Vec3 } from "../../shared/vec3";
 
 const ready = initOpenCascade({ locateFile: () => openCascadeWasm }).then(setOC);
@@ -48,6 +48,18 @@ function solidsOf(shape: Shape3D): Shape3D[] {
   explorer.delete();
   return found;
 }
+
+/**
+ * Carves the part out of a block, one solid at a time.
+ *
+ * A STEP assembly imports as a multi-solid compound, and OpenCascade quietly
+ * drops tool solids when a boolean is handed the compound whole: cutting the
+ * lower block with the sample's two-piece part removed the dish and left the
+ * second piece standing as mold material inside the cavity. Cutting each solid
+ * separately is the only form that reliably empties the whole cavity.
+ */
+const cutPart = (block: Shape3D, part: Shape3D[]): Shape3D =>
+  part.reduce((result, solid) => replace(result, result.cut(solid)), block);
 
 /** A real mold half spans the block; anything landing strictly inside is a core. */
 function reachesWall(shape: Shape3D, min: SimplePoint, max: SimplePoint): boolean {
@@ -105,14 +117,14 @@ function moveCores(from: Shape3D, to: Shape3D, min: SimplePoint, max: SimplePoin
  * real curved surface.
  */
 function pocketFloor(
-  part: Shape3D,
+  part: Shape3D[],
   region: Shape3D,
   sampleBottom: number,
   fallback: number,
   tolerance: number
 ): number {
   const [regionMin, regionMax] = region.boundingBox.bounds;
-  const faces = part.faces;
+  const faces = part.flatMap((solid) => solid.faces);
   const floors: number[] = [];
 
   for (const face of faces) {
@@ -140,7 +152,7 @@ function pocketFloor(
 function moveSeamCores(
   lower: Shape3D,
   upper: Shape3D,
-  part: Shape3D,
+  part: Shape3D[],
   min: SimplePoint,
   max: SimplePoint,
   partBottom: number,
@@ -150,7 +162,7 @@ function moveSeamCores(
   const sampleBottom = Math.max(min[2], splitZ - seamSampleDepth(min, max));
   if (splitZ - sampleBottom <= tolerance) return [lower, upper];
 
-  const slab = makeBox([min[0], min[1], sampleBottom], [max[0], max[1], splitZ]).cut(part);
+  const slab = cutPart(makeBox([min[0], min[1], sampleBottom], [max[0], max[1], splitZ]), part);
   const regions = solidsOf(slab);
   const enclosed = regions.filter((region) => !reachesWall(region, min, max));
   let nextLower = lower;
@@ -222,18 +234,17 @@ async function generate({ step, params, splitAxis }: GenerateMoldRequest): Promi
   await ready;
   let part = (await importSTEP(new Blob([step]))).asShape3D();
   part = rotateToZ(part, splitAxis);
-  part = part.scale(1 + params.shrinkagePercent / 100, part.boundingBox.center);
 
   const [partMin, partMax] = part.boundingBox.bounds;
   const wall = params.wallThickness;
-  const min = partMin.map((value) => value - wall) as SimplePoint;
-  const max = partMax.map((value) => value + wall) as SimplePoint;
+  const [min, max] = moldBounds(partMin as Vec3, partMax as Vec3, params) as [SimplePoint, SimplePoint];
   const surface = points(part.mesh({ tolerance: 0.2 }).vertices) as Vec3[];
-  const splitZ = partingHeight(surface, partMin as Vec3, partMax as Vec3);
-  let lower = makeBox(min, [max[0], max[1], splitZ]).cut(part);
-  let upper = makeBox([min[0], min[1], splitZ], max).cut(part);
+  const splitZ = partingLevel(surface, partMin as Vec3, partMax as Vec3, params.splitOffset);
+  const partSolids = solidsOf(part);
+  let lower = cutPart(makeBox(min, [max[0], max[1], splitZ]), partSolids);
+  let upper = cutPart(makeBox([min[0], min[1], splitZ], max), partSolids);
 
-  [lower, upper] = moveSeamCores(lower, upper, part, min, max, partMin[2], splitZ);
+  [lower, upper] = moveSeamCores(lower, upper, partSolids, min, max, partMin[2], splitZ);
 
   // Hand each half the cores it must carry so both stay exact negatives of the
   // part: first the fill of any pocket opening at the parting plane, then any
@@ -250,7 +261,7 @@ async function generate({ step, params, splitAxis }: GenerateMoldRequest): Promi
     bore.delete();
   }
 
-  const { gate, vents } = flowPorts(surface, partMin as Vec3, partMax as Vec3);
+  const { gate, vents } = flowPorts(surface, partMin as Vec3, partMax as Vec3, params.gateOffset);
   for (const [point, diameter] of [[gate, params.injectionDiameter], ...vents.map((point) => [point, params.ventDiameter] as const)] as const) {
     const channel = makeCylinder(diameter / 2, max[2] - point[2] + 0.5, [point[0], point[1], point[2] - 0.25]);
     upper = replace(upper, upper.cut(channel));
@@ -266,6 +277,7 @@ async function generate({ step, params, splitAxis }: GenerateMoldRequest): Promi
     Promise.all(exports.map(async ([kind, blob]) => ({ kind, data: await blob.arrayBuffer() }))),
     Promise.resolve({ part: mesh(part), lower: mesh(lower), upper: mesh(upper) })
   ]);
+  partSolids.forEach((solid) => solid.delete());
   part.delete();
   lower.delete();
   upper.delete();
