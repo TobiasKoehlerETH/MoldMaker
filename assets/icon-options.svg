@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1700" height="760" viewBox="0 0 1700 760">
+  <rect width="1700" height="760" fill="#FFFFFF"/>
+  <style>
+    .label { font: 600 20px system-ui, sans-serif; fill: #000000; }
+    .card { fill: #FFFFFF; stroke: #000000; stroke-width: 2; }
+  </style>
+  <rect class="card" x="24" y="30" width="300" height="330" rx="24"/>
+  <rect class="card" x="362" y="30" width="300" height="330" rx="24"/>
+  <rect class="card" x="700" y="30" width="300" height="330" rx="24"/>
+  <rect class="card" x="1038" y="30" width="300" height="330" rx="24"/>
+  <rect class="card" x="1376" y="30" width="300" height="330" rx="24"/>
+  <rect class="card" x="24" y="400" width="300" height="330" rx="24"/>
+  <rect class="card" x="362" y="400" width="300" height="330" rx="24"/>
+  <rect class="card" x="700" y="400" width="300" height="330" rx="24"/>
+  <rect class="card" x="1038" y="400" width="300" height="330" rx="24"/>
+  <rect class="card" x="1376" y="400" width="300" height="330" rx="24"/>
+  <image href="icon-option-01.svg" x="61" y="88" width="226" height="226"/>
+  <image href="icon-option-02.svg" x="399" y="88" width="226" height="226"/>
+  <image href="icon-option-03.svg" x="737" y="88" width="226" height="226"/>
+  <image href="icon-option-04.svg" x="1075" y="88" width="226" height="226"/>
+  <image href="icon-option-05.svg" x="1413" y="88" width="226" height="226"/>
+  <image href="icon-option-06.svg" x="61" y="458" width="226" height="226"/>
+  <image href="icon-option-07.svg" x="399" y="458" width="226" height="226"/>
+  <image href="icon-option-08.svg" x="737" y="458" width="226" height="226"/>
+  <image href="icon-option-09.svg" x="1075" y="458" width="226" height="226"/>
+  <image href="icon-option-10.svg" x="1413" y="458" width="226" height="226"/>
+  <text class="label" x="42" y="62">01 · Split slab</text>
+  <text class="label" x="380" y="62">02 · Isometric mold</text>
+  <text class="label" x="718" y="62">03 · Gate block</text>
+  <text class="label" x="1056" y="62">04 · Four-point mold</text>
+  <text class="label" x="1394" y="62">05 · Syringe gate</text>
+  <text class="label" x="42" y="432">06 · Pocketed cube</text>
+  <text class="label" x="380" y="432">07 · Frame cavity</text>
+  <text class="label" x="718" y="432">08 · Diamond gate</text>
+  <text class="label" x="1056" y="432">09 · Split cube</text>
+  <text class="label" x="1394" y="432">10 · Interlock</text>
+</svg>
