@@ -21,7 +21,9 @@ export const moldParamsSchema = z.object({
   // Moves the injection port off the part's centre, in millimetres.
   gateOffset: z.tuple([offset, offset]).default([0, 0]),
   // Raises or lowers the parting line from the automatic one, in millimetres.
-  splitOffset: offset.default(0)
+  splitOffset: offset.default(0),
+  // Uniformly enlarges the casting model to compensate for material shrinkage.
+  shrinkageScale: z.number().min(0).max(100).default(0)
 });
 
 export type MoldParams = z.infer<typeof moldParamsSchema>;
@@ -53,7 +55,8 @@ export const DEFAULT_PARAMS: MoldParams = {
   screwDiameter: 3.4,
   padding: [0, 0, 0],
   gateOffset: [0, 0],
-  splitOffset: 0
+  splitOffset: 0,
+  shrinkageScale: 0
 };
 
 /** Material kept between a screw hole and the outside face. */
@@ -61,6 +64,19 @@ const SCREW_EDGE = 1.2;
 
 const orient = ([x, y, z]: Vec3, axis: SplitAxis): Vec3 =>
   axis === 0 ? [-z, y, x] : axis === 1 ? [x, -z, y] : [x, y, z];
+
+interface OrientedPart {
+  axis: SplitAxis;
+  edges: Vec3[][];
+  points: Vec3[];
+  min: Vec3;
+  max: Vec3;
+}
+
+// buildMold runs on every inspector edit. Part geometry is immutable while a
+// model is open, so avoid remapping and flattening all STEP edges for each
+// parameter-only change.
+const orientedParts = new WeakMap<PartModel, OrientedPart>();
 
 /** Uses the thinnest part axis as the split direction to minimise print time. */
 export function splitAxis(part: PartModel): SplitAxis {
@@ -209,13 +225,20 @@ export const screwPoints = (
 
 /** A lightweight preview plan. OpenCascade builds the exact solids from the same parameters. */
 export function buildMold(part: PartModel, params: MoldParams): Mold {
-  const axis = splitAxis(part);
-  const partEdges = part.edges.map((edge) => edge.map((point) => orient(point, axis)));
-  const [cavityMin, cavityMax] = boundsOf(partEdges.flat());
+  let oriented = orientedParts.get(part);
+  if (!oriented) {
+    const axis = splitAxis(part);
+    const edges = part.edges.map((edge) => edge.map((point) => orient(point, axis)));
+    const points = edges.flat();
+    const [min, max] = boundsOf(points);
+    oriented = { axis, edges, points, min, max };
+    orientedParts.set(part, oriented);
+  }
+  const { axis, edges: partEdges, points, min: cavityMin, max: cavityMax } = oriented;
   const wall = params.wallThickness;
   const [min, max] = moldBounds(cavityMin, cavityMax, params);
-  const splitZ = partingLevel(partEdges.flat(), cavityMin, cavityMax, params.splitOffset);
-  const { gate, vents } = flowPorts(partEdges.flat(), cavityMin, cavityMax, params.gateOffset);
+  const splitZ = partingLevel(points, cavityMin, cavityMax, params.splitOffset);
+  const { gate, vents } = flowPorts(points, cavityMin, cavityMax, params.gateOffset);
   const screws = screwPoints(min, max, wall, params.screwDiameter);
 
   return {
@@ -228,7 +251,7 @@ export function buildMold(part: PartModel, params: MoldParams): Mold {
     vents,
     screws,
     gateRange: gateRangeOf(cavityMin, cavityMax, params.injectionDiameter),
-    splitRange: splitRangeOf(partEdges.flat(), cavityMin, cavityMax),
+    splitRange: splitRangeOf(points, cavityMin, cavityMax),
     size: max.map((value, index) => value - min[index]) as Vec3,
     // Size at zero padding: the smallest block the wall allows, in whole mm.
     minSize: cavityMax.map(

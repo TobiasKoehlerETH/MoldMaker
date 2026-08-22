@@ -102,9 +102,142 @@ body {
 
 button { font: inherit; }
 
+@keyframes moldmaker-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes moldmaker-fade-up {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes moldmaker-pop-in {
+  from { opacity: 0; transform: translateY(5px) scale(0.96); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes moldmaker-float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-4px); }
+}
+
+@keyframes moldmaker-grid-in {
+  from { opacity: 0; }
+  to { opacity: 0.22; }
+}
+
 input[type="number"] { appearance: textfield; }
 input[type="number"]::-webkit-inner-spin-button,
 input[type="number"]::-webkit-outer-spin-button { margin: 0; appearance: none; }
+
+.app-rail {
+  display: flex;
+  width: 48px;
+  flex: 0 0 48px;
+  flex-direction: column;
+  background: var(--sidebar);
+  color: var(--sidebar-foreground);
+  animation: moldmaker-fade-in 320ms ease-out both;
+}
+
+.app-rail-group {
+  padding: 10px 6px;
+}
+
+.app-rail-group [data-sidebar="menu"] {
+  gap: 6px;
+}
+
+.app-rail-group [data-sidebar="menu-button"] {
+  border-radius: 8px;
+  transition: transform 160ms ease-out, background-color 160ms ease-out, color 160ms ease-out;
+}
+
+.app-rail-tool:hover {
+  transform: translateX(2px);
+}
+
+.app-rail-spacer { flex: 1; }
+
+.app-rail-version {
+  padding: 0 0 12px;
+  color: var(--sidebar-foreground);
+  font-size: 9px;
+  text-align: center;
+  opacity: 0.42;
+}
+
+/* Sidebar's desktop surface is fixed by the shared shadcn primitive. Keep
+   that surface beside MoldMaker's persistent icon rail instead of underneath
+   it; the collapsed state retreats only across its own column. */
+.app-secondary-sidebar {
+  left: 48px;
+  border-right: 0;
+  border-left: 1px solid var(--sidebar-border);
+}
+
+.group[data-collapsible="offcanvas"] .app-secondary-sidebar {
+  left: calc(var(--sidebar-width) * -1);
+}
+
+.workspace-sidebar-header {
+  position: relative;
+  min-height: 56px;
+  gap: 3px;
+  border-bottom: 1px solid var(--sidebar-border);
+  padding: 12px 16px 10px;
+  animation: moldmaker-fade-up 360ms 40ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.workspace-sidebar-kicker {
+  color: var(--sidebar-foreground);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  opacity: 0.56;
+}
+
+.workspace-sidebar-title {
+  color: var(--sidebar-foreground);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.workspace-sidebar-description {
+  color: var(--sidebar-foreground);
+  font-size: 11px;
+  line-height: 1.35;
+  opacity: 0.52;
+}
+
+.workspace-sidebar-content > [data-sidebar="group"] {
+  animation: moldmaker-fade-up 360ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.workspace-sidebar-content > [data-sidebar="group"]:nth-child(2) {
+  animation-delay: 55ms;
+}
+
+.workspace-sidebar-content > [data-sidebar="group"]:nth-child(3) {
+  animation-delay: 55ms;
+}
+
+.workspace-sidebar-content > [data-sidebar="group"]:nth-child(5) {
+  animation-delay: 110ms;
+}
+
+.workspace-sidebar-content > [data-sidebar="group"]:nth-child(7) {
+  animation-delay: 165ms;
+}
+
+.workspace-sidebar-content [data-sidebar="menu-button"] {
+  transition: transform 160ms ease-out, background-color 160ms ease-out, color 160ms ease-out;
+}
+
+.workspace-sidebar-content [data-sidebar="menu-button"]:hover {
+  transform: translateX(2px);
+}
 
 .command-bar {
   position: relative;
@@ -116,6 +249,7 @@ input[type="number"]::-webkit-outer-spin-button { margin: 0; appearance: none; }
   border-bottom: 1px solid var(--border);
   background: color-mix(in oklch, var(--background) 92%, transparent);
   user-select: none;
+  animation: moldmaker-fade-in 300ms 80ms ease-out both;
 }
 
 .file-name {
@@ -129,6 +263,13 @@ input[type="number"]::-webkit-outer-spin-button { margin: 0; appearance: none; }
 .command-actions {
   display: flex;
   align-items: center;
+}
+
+.command-status {
+  margin-right: 4px;
+  color: var(--muted-foreground);
+  font-size: 11px;
+  white-space: nowrap;
 }
 
 .viewport {
@@ -148,6 +289,7 @@ input[type="number"]::-webkit-outer-spin-button { margin: 0; appearance: none; }
     linear-gradient(90deg, var(--border) 1px, transparent 1px);
   background-size: 36px 36px;
   mask-image: radial-gradient(circle at center, black, transparent 72%);
+  animation: moldmaker-grid-in 700ms 120ms ease-out both;
 }
 
 .viewport-canvas {
@@ -169,15 +311,12 @@ input[type="number"]::-webkit-outer-spin-button { margin: 0; appearance: none; }
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 6px;
+  gap: 14px;
+  animation: moldmaker-fade-up 500ms 90ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
 .empty-state button { pointer-events: auto; }
-.empty-icon { display: grid; place-items: center; width: 76px; height: 76px; color: var(--muted-foreground); }
-.empty-icon svg { width: 48px; height: 48px; stroke-width: 1; }
-.empty-title { font-size: 16px; font-weight: 500; letter-spacing: -0.01em; }
-.empty-tagline { color: var(--muted-foreground); font-size: 12px; }
-.empty-actions { display: flex; gap: 8px; margin-top: 12px; }
+.empty-actions { display: flex; gap: 8px; animation: moldmaker-fade-up 420ms 220ms cubic-bezier(0.22, 1, 0.36, 1) both; }
 
 .body-menu {
   position: absolute;
@@ -191,6 +330,18 @@ input[type="number"]::-webkit-outer-spin-button { margin: 0; appearance: none; }
   box-shadow: 0 14px 36px rgb(0 0 0 / 0.18);
   backdrop-filter: blur(18px);
   transform: translate(-50%, calc(-100% - 14px));
+  animation: moldmaker-pop-in 180ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
 }
 
 .app-meta {

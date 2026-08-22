@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Eye, EyeOff, PanelLeftClose } from "lucide-react";
+import { Eye, EyeOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -23,7 +23,6 @@ interface InspectorProps {
   onChange(patch: Partial<MoldParams>): void;
   onViewChange(patch: Partial<ViewState>): void;
   onToggleObject(id: SceneObjectId): void;
-  onCollapse(): void;
 }
 
 interface FieldProps {
@@ -46,6 +45,7 @@ interface Draft {
 }
 
 const FIELDS = [
+  { key: "shrinkageScale", label: "Shrinkage", step: 0.1, min: 0, max: 100, unit: "%" },
   { key: "wallThickness", label: "Wall", step: 0.5, min: 3, max: 30, unit: "mm" },
   { key: "injectionDiameter", label: "Syringe port", step: 0.1, min: 1, max: 10, unit: "mm" },
   { key: "ventDiameter", label: "Air vents", step: 0.1, min: 0.2, max: 2, unit: "mm" },
@@ -295,16 +295,12 @@ export function Inspector(props: InspectorProps) {
   const moldPanel = props.section === "mold";
   return (
     <>
-      <SidebarHeader className="h-14 flex-row items-center justify-between border-b border-sidebar-border px-3">
-        <div className="grid gap-0.5">
-          <strong className="text-sm">{moldPanel ? "Mold" : "View"}</strong>
-          <span className="text-[10px] text-sidebar-foreground/55">{moldPanel ? "RTV silicone" : "Display"}</span>
-        </div>
-        <Button variant="ghost" size="icon" className="size-7" aria-label="Collapse sidebar" title="Collapse sidebar" onClick={props.onCollapse}>
-          <PanelLeftClose />
-        </Button>
+      <SidebarHeader className="workspace-sidebar-header">
+          <div className="grid gap-0.5">
+            <strong className="workspace-sidebar-title">{moldPanel ? "Mold settings" : "View settings"}</strong>
+          </div>
       </SidebarHeader>
-      <SidebarContent>{moldPanel ? <MoldPanel {...props} /> : <ViewPanel {...props} />}</SidebarContent>
+      <SidebarContent key={props.section} className="workspace-sidebar-content">{moldPanel ? <MoldPanel {...props} /> : <ViewPanel {...props} />}</SidebarContent>
     </>
   );
 }

@@ -39,8 +39,30 @@ interface LoadedPart {
 
 let loadedPart: LoadedPart | null = null;
 
+/**
+ * The scaled solids are immutable inputs to every mold boolean. Keep them
+ * alive between edits so changing padding, ports, or the seam does not clone
+ * and tessellate the imported part again.
+ */
+interface PreparedPart {
+  source: LoadedPart;
+  scale: number;
+  solids: Shape3D[];
+  surface: Vec3[];
+  min: Vec3;
+  max: Vec3;
+  previewMesh: CadMesh;
+}
+
+let preparedPart: PreparedPart | null = null;
+
 /** The most recent completed halves, kept alive so Export can encode on demand. */
 let halves: { lower: Shape3D; upper: Shape3D } | null = null;
+
+function releasePreparedPart(): void {
+  preparedPart?.solids.forEach((solid) => solid.delete());
+  preparedPart = null;
+}
 
 /** OpenCascade comparisons scaled to the generated mold's envelope. */
 const geometryTolerance = (min: SimplePoint, max: SimplePoint): number =>
@@ -267,11 +289,57 @@ async function meshPart(step: ArrayBuffer, axis: SplitAxis): Promise<LoadedPart>
   };
 }
 
+function preparePart(source: LoadedPart, shrinkageScale: number): PreparedPart {
+  const factor = 1 + shrinkageScale / 100;
+  if (preparedPart?.source === source && preparedPart.scale === factor) return preparedPart;
+
+  releasePreparedPart();
+  if (factor === 1) {
+    preparedPart = {
+      source,
+      scale: factor,
+      solids: source.solids.map((solid) => solid.clone()),
+      surface: source.surface,
+      min: source.min,
+      max: source.max,
+      previewMesh: source.previewMesh
+    };
+    return preparedPart;
+  }
+
+  const centre: SimplePoint = [
+    (source.min[0] + source.max[0]) / 2,
+    (source.min[1] + source.max[1]) / 2,
+    (source.min[2] + source.max[2]) / 2
+  ];
+  const scaledShape = source.shape.clone().scale(factor, centre);
+  const scaledSolids = source.solids.map((solid) => solid.clone().scale(factor, centre));
+  const [scaledMin, scaledMax] = scaledShape.boundingBox.bounds;
+  const scaledSurface = source.surface.map(([x, y, z]) => [
+    centre[0] + (x - centre[0]) * factor,
+    centre[1] + (y - centre[1]) * factor,
+    centre[2] + (z - centre[2]) * factor
+  ] as Vec3);
+  const result: PreparedPart = {
+    source,
+    scale: factor,
+    solids: scaledSolids,
+    surface: scaledSurface,
+    min: scaledMin as Vec3,
+    max: scaledMax as Vec3,
+    previewMesh: mesh(scaledShape)
+  };
+  scaledShape.delete();
+  preparedPart = result;
+  return result;
+}
+
 async function generate({ step, params, splitAxis }: GenerateMoldRequest): Promise<CadPreview> {
   await ready;
   // A request without STEP bytes rebuilds the part already held, so a settings
   // change pays only for what the parameters moved.
   if (step) {
+    releasePreparedPart();
     if (loadedPart) {
       loadedPart.solids.forEach((solid) => solid.delete());
       loadedPart.shape.delete();
@@ -279,7 +347,7 @@ async function generate({ step, params, splitAxis }: GenerateMoldRequest): Promi
     loadedPart = await meshPart(step, splitAxis);
   }
   if (!loadedPart) throw new Error("No part is open");
-  const part = loadedPart;
+  const part = preparePart(loadedPart, params.shrinkageScale);
 
   const [min, max] = moldBounds(part.min, part.max, params) as [SimplePoint, SimplePoint];
   const splitZ = partingLevel(part.surface, part.min, part.max, params.splitOffset);
@@ -330,7 +398,20 @@ async function exportHalves(): Promise<GeneratedFile[]> {
   return Promise.all(exports.map(async ([kind, blob]) => ({ kind, data: await blob.arrayBuffer() })));
 }
 
-self.onmessage = async ({ data }: MessageEvent<CadRequest>) => {
+/**
+ * OpenCascade work is deliberately serialized. When a slider is dragged, the
+ * renderer can post several builds while one is still running; only the most
+ * recent queued build can affect the screen, so older queued builds are
+ * discarded before they enter the kernel.
+ */
+const queue: CadRequest[] = [];
+let processing = false;
+
+function postSuperseded(id: number): void {
+  self.postMessage({ id, ok: false, error: "Build superseded" } satisfies CadResponse);
+}
+
+async function processRequest(data: CadRequest): Promise<void> {
   try {
     if (data.kind === "export") {
       const files = await exportHalves();
@@ -352,4 +433,29 @@ self.onmessage = async ({ data }: MessageEvent<CadRequest>) => {
   } catch (error) {
     self.postMessage({ id: data.id, ok: false, error: error instanceof Error ? error.message : "Mold generation failed" } satisfies CadResponse);
   }
+}
+
+async function drainQueue(): Promise<void> {
+  if (processing) return;
+  processing = true;
+  try {
+    while (queue.length > 0) {
+      await processRequest(queue.shift()!);
+    }
+  } finally {
+    processing = false;
+    if (queue.length > 0) void drainQueue();
+  }
+}
+
+self.onmessage = ({ data }: MessageEvent<CadRequest>) => {
+  if (data.kind === "generate") {
+    const queuedGenerate = queue.findIndex((request) => request.kind === "generate");
+    if (queuedGenerate !== -1) {
+      const superseded = queue.splice(queuedGenerate, 1)[0];
+      postSuperseded(superseded.id);
+    }
+  }
+  queue.push(data);
+  void drainQueue();
 };

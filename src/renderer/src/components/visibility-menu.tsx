@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { Blend, Box, EyeOff, type LucideIcon } from "lucide-react";
+import { Blend, Eye, EyeOff, type LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   OBJECT_LABELS,
@@ -17,7 +17,7 @@ interface VisibilityMenuProps {
 }
 
 const ICONS: Record<Visibility, LucideIcon> = {
-  solid: Box,
+  solid: Eye,
   ghost: Blend,
   hidden: EyeOff
 };

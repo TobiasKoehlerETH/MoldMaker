@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Box, Download, FolderOpen, LoaderCircle, PanelLeftClose, PanelLeftOpen, Save, ScanLine, SlidersHorizontal, Upload } from "lucide-react";
+import { Download, FolderOpen, Save, ScanLine, SlidersHorizontal, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Inspector } from "@/components/inspector";
 import { VisibilityMenu } from "@/components/visibility-menu";
@@ -9,13 +9,15 @@ import {
   SidebarContent,
   SidebarGroup,
   SidebarGroupContent,
+  SidebarGroupLabel,
+  SidebarHeader,
   SidebarInset,
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarProvider
 } from "@/components/ui/sidebar";
-import { cn } from "@/lib/utils";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { BUILDING, useAppStore } from "@/store/app-store";
 import { DEFAULT_VIEW, type BodySelection, type SceneObjectId, type ViewState } from "@/viewport/modes";
 import { exportMoldFiles, generateMold } from "@/cad";
@@ -23,7 +25,7 @@ import type { CadPreview } from "../../shared/cad";
 import type { NativeResult } from "../../shared/electron-api";
 import { buildMold, DEFAULT_PARAMS, moldWireframe, type MoldParams } from "../../shared/mold";
 import { baseName, decodeProject, encodeProject } from "../../shared/project";
-import { readStepModel } from "../../shared/step";
+import { scalePartModel, readStepModel } from "../../shared/step";
 
 interface ToolButtonProps {
   label: string;
@@ -45,18 +47,54 @@ type SidebarPanel = "mold" | "view";
 function ToolButton({ label, active = false, children, ...props }: ToolButtonProps) {
   return (
     <SidebarMenuItem>
-      <SidebarMenuButton
-        aria-label={label}
-        aria-pressed={active}
-        title={label}
-        isActive={active}
-        className="mx-auto size-8 justify-center p-0"
-        {...props}
-      >
-        {children}
-        <span className="sr-only">{label}</span>
-      </SidebarMenuButton>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <SidebarMenuButton
+            aria-label={label}
+            aria-pressed={active}
+            isActive={active}
+            className="app-rail-tool mx-auto size-8 justify-center p-0"
+            {...props}
+          >
+            {children}
+            <span className="sr-only">{label}</span>
+          </SidebarMenuButton>
+        </TooltipTrigger>
+        <TooltipContent side="right">{label}</TooltipContent>
+      </Tooltip>
     </SidebarMenuItem>
+  );
+}
+
+function EmptyWorkspacePanel({ onImport, onOpenProject }: { onImport(): void; onOpenProject(): void }) {
+  return (
+    <>
+      <SidebarHeader className="workspace-sidebar-header">
+        <div className="workspace-sidebar-title">Workspace</div>
+        <div className="workspace-sidebar-description">Create a mold from a STEP model.</div>
+      </SidebarHeader>
+      <SidebarContent className="workspace-sidebar-content">
+        <SidebarGroup>
+          <SidebarGroupLabel>Open</SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              <SidebarMenuItem>
+                <SidebarMenuButton onClick={onImport}>
+                  <Upload />
+                  <span>Load STEP model</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton onClick={onOpenProject}>
+                  <FolderOpen />
+                  <span>Open project</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+      </SidebarContent>
+    </>
   );
 }
 
@@ -72,12 +110,12 @@ export function App() {
   const finishBuild = useAppStore((state) => state.finishBuild);
 
   const [version, setVersion] = useState("");
-  const [railOpen, setRailOpen] = useState(true);
   const [sidebarPanel, setSidebarPanel] = useState<SidebarPanel | null>("mold");
   const [view, setView] = useState<ViewState>(DEFAULT_VIEW);
   const [selection, setSelection] = useState<BodySelection | null>(null);
   const [generated, setGenerated] = useState<GeneratedState | null>(null);
-  const mold = useMemo(() => (part ? buildMold(part, params) : null), [part, params]);
+  const scaledPart = useMemo(() => (part ? scalePartModel(part, params.shrinkageScale) : null), [part, params.shrinkageScale]);
+  const mold = useMemo(() => (scaledPart ? buildMold(scaledPart, params) : null), [scaledPart, params]);
   // Encoded once per file: rebuilds pass the same array so the worker keeps
   // its imported part and no bytes travel.
   const encodedSource = useMemo(() => (source ? new TextEncoder().encode(source) : null), [source]);
@@ -90,7 +128,6 @@ export function App() {
   // yet; it gets a spinner instead of an empty envelope outline.
   const plan = useMemo(() => (mold && preview && !ready ? moldWireframe(mold) : null), [mold, preview, ready]);
   const busy = status.endsWith("…");
-  const loading = busy && !preview;
 
   useEffect(() => {
     void window.moldMaker.getAppInfo().then((info) => setVersion(info.version));
@@ -148,7 +185,7 @@ export function App() {
   }
 
   async function importStep(): Promise<void> {
-    setStatus("Opening…");
+    setStatus("");
     await run(window.moldMaker.openStepFile(), (file) => {
       const text = new TextDecoder().decode(file.data);
       const model = readStepModel(text);
@@ -160,7 +197,7 @@ export function App() {
   }
 
   async function openProject(): Promise<void> {
-    setStatus("Opening…");
+    setStatus("");
     await run(window.moldMaker.openProjectFile(), (file) => {
       const project = decodeProject(file.data);
       setGenerated(null);
@@ -205,26 +242,22 @@ export function App() {
   }
 
   return (
-    <SidebarProvider className="h-full min-h-0" style={{ "--sidebar-width": "18rem" } as React.CSSProperties}>
-      <Sidebar
-        collapsible="none"
-        aria-hidden={!railOpen}
-        aria-label="Mold tools"
-        className={cn(
-          "border-r border-sidebar-border transition-[width,visibility] duration-300 ease-in-out motion-reduce:transition-none",
-          railOpen ? "visible w-12" : "invisible w-0 overflow-hidden border-r-0"
-        )}
+    <SidebarProvider
+      className="h-full min-h-0"
+      open={sidebarPanel !== null}
+      onOpenChange={(open) => setSidebarPanel((current) => (open ? (current ?? "mold") : null))}
+      style={{ "--sidebar-width": "14.5rem", "--sidebar-width-icon": "3rem" } as React.CSSProperties}
+    >
+      {/* The narrow rail is the persistent primary navigation; the wider
+          sidebar beside it changes context between mold and view controls. */}
+      <aside
+        aria-label="MoldMaker navigation"
+        className="app-rail"
       >
-        <SidebarContent>
-          <SidebarGroup className="w-12 px-1 py-2">
+        <TooltipProvider delayDuration={0}>
+          <SidebarGroup className="app-rail-group">
             <SidebarGroupContent>
               <SidebarMenu>
-                <ToolButton label={railOpen ? "Hide tools" : "Show tools"} onClick={() => setRailOpen((open) => !open)}>
-                  {railOpen ? <PanelLeftClose /> : <PanelLeftOpen />}
-                </ToolButton>
-                <ToolButton label="Import STEP" onClick={importStep}>
-                  <Upload />
-                </ToolButton>
                 <ToolButton
                   label="Mold settings"
                   active={sidebarPanel === "mold"}
@@ -244,47 +277,45 @@ export function App() {
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>
-        </SidebarContent>
-      </Sidebar>
+        </TooltipProvider>
+        <div className="app-rail-spacer" />
+        <div className="app-rail-version">v{version || "…"}</div>
+      </aside>
 
-      {part && (
-        <Sidebar
-          collapsible="none"
-          aria-hidden={!sidebarPanel}
-          role="complementary"
-          aria-label={sidebarPanel === "view" ? "View settings" : "Mold settings"}
-          className={cn(
-            "border-r border-sidebar-border transition-[width,visibility] duration-300 ease-in-out motion-reduce:transition-none",
-            sidebarPanel ? "visible w-72" : "invisible w-0 overflow-hidden border-r-0"
-          )}
-        >
-          {/* Fixed-width inner column so the settings reflow never shows while
-              the panel's width animates. */}
-          <div className={cn("flex h-full w-72 flex-col", !sidebarPanel && "pointer-events-none")}>
-            <Inspector
-              section={sidebarPanel ?? "mold"}
-              params={params}
-              mold={mold}
-              view={view}
-              onChange={setParams}
-              onViewChange={(patch) => setView((current) => ({ ...current, ...patch }))}
-              onToggleObject={toggleObject}
-              onCollapse={() => setSidebarPanel(null)}
-            />
-          </div>
-        </Sidebar>
-      )}
+      <Sidebar
+        collapsible="offcanvas"
+        className="app-secondary-sidebar"
+        aria-hidden={sidebarPanel === null}
+        role="complementary"
+        aria-label={part ? (sidebarPanel === "view" ? "View settings" : "Mold settings") : "Workspace"}
+      >
+        {part ? (
+          <Inspector
+            section={sidebarPanel ?? "mold"}
+            params={params}
+            mold={mold}
+            view={view}
+            onChange={setParams}
+            onViewChange={(patch) => setView((current) => ({ ...current, ...patch }))}
+            onToggleObject={toggleObject}
+          />
+        ) : (
+          <EmptyWorkspacePanel onImport={importStep} onOpenProject={openProject} />
+        )}
+      </Sidebar>
 
       <SidebarInset className="min-h-0 min-w-0">
         <header className="command-bar">
           <div className="file-name">{fileName ?? "Untitled"}</div>
           <div className="command-actions">
             {busy && (
-              <span className="inline-flex items-center text-muted-foreground" role="status" aria-live="polite" title={status}>
-                <LoaderCircle className="size-4 animate-spin" aria-hidden="true" />
-                <span className="sr-only">{status}</span>
+              <span className="command-status" role="status" aria-live="polite" title={status}>
+                {status}
               </span>
             )}
+            <Button variant="ghost" size="icon" aria-label="Import STEP" title="Import STEP" onClick={importStep}>
+              <Upload />
+            </Button>
             <Button variant="ghost" size="icon" aria-label="Open project" title="Open project" onClick={openProject}>
               <FolderOpen />
             </Button>
@@ -301,19 +332,6 @@ export function App() {
           <div className="viewport-grid" />
           <Viewport preview={preview} plan={plan} view={view} onSelect={setSelection} />
 
-          {!railOpen && (
-            <Button
-              variant="ghost"
-              size="icon"
-              className="absolute left-2 top-2 z-10 text-muted-foreground hover:text-foreground"
-              aria-label="Show tools"
-              title="Show tools"
-              onClick={() => setRailOpen(true)}
-            >
-              <PanelLeftOpen />
-            </Button>
-          )}
-
           {selection && (
             <VisibilityMenu
               selection={selection}
@@ -328,13 +346,8 @@ export function App() {
 
           {!part && (
             <section className="empty-state">
-              <div className="empty-icon">
-                <Box aria-hidden="true" />
-              </div>
-              <h1 className="empty-title">MoldMaker</h1>
-              <p className="empty-tagline">Turn a STEP model into a printable two-part mold.</p>
               <div className="empty-actions">
-                <Button onClick={importStep}>
+                <Button aria-label="Load STEP model" onClick={importStep}>
                   <Upload /> Import STEP
                 </Button>
                 <Button variant="outline" onClick={openProject}>
@@ -344,15 +357,8 @@ export function App() {
             </section>
           )}
 
-          {loading && (
-            /* Status is already announced by the header indicator; this is only the large visual. */
-            <div className="empty-state" aria-hidden="true">
-              <LoaderCircle className="size-8 animate-spin text-muted-foreground" />
-            </div>
-          )}
         </section>
 
-        <div className="app-meta">v{version || "…"}</div>
       </SidebarInset>
     </SidebarProvider>
   );

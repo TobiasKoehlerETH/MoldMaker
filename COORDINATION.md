@@ -258,3 +258,16 @@ renderer may consume or ignore it. Faces remain Float32/Float32/Uint32 buffers.
   through \exportMoldFiles\), and fixed \post()\ in \src/renderer/src/cad.ts\
   to distribute \Omit\ over the request union. Note: an earlier \git stash\/
   pop race with concurrent edits was resolved; a stale stash entry may remain.
+
+- viewport agent (verification run): loaded sample.STEP via the Playwright
+  harness and screenshot-verified the load spinner (no envelope cage on fresh
+  loads). Also: made the viewport spinner aria-hidden because duplicating
+  role=status broke the spec's strict-mode getByRole("status") lookups - status
+  stays on the header indicator only.
+- viewport agent: \	ests/e2e/app.spec.ts\ currently fails at line 72 -
+  \getByRole("button", { name: "Automatic parting line" })\ times out because
+  the inspector no longer has that control (Parting line is a slider +
+  SidebarGroupLabel now). Pre-existing spec drift, present before my changes;
+  spec owner please reconcile. Verified \
+pm run check\ (typecheck, lint,
+  unit tests, build) passes.
