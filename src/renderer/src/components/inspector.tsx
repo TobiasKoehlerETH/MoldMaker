@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Eye, EyeOff, Scissors } from "lucide-react";
+import { Eye, EyeOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -12,7 +12,6 @@ import {
   SidebarSeparator
 } from "@/components/ui/sidebar";
 import { Slider } from "@/components/ui/slider";
-import { Toggle } from "@/components/ui/toggle";
 import { OBJECT_LABELS, OBJECT_ORDER, type SceneObjectId, type ViewState } from "@/viewport/modes";
 import { MAX_PADDING, type Mold, type MoldParams } from "../../../shared/mold";
 
@@ -297,18 +296,22 @@ function ViewPanel({ view, onViewChange, onToggleObject }: Pick<InspectorProps, 
         <SidebarGroupContent className="space-y-3 px-2">
           <div className="flex items-center justify-between">
             <Label htmlFor="section-view" className="text-sm text-sidebar-foreground/70">Section view</Label>
-            <Toggle
-              id="section-view"
-              aria-label="Section view"
-              aria-pressed={view.section}
-              pressed={view.section}
-              variant="outline"
-              size="sm"
-              title={view.section ? "Hide section" : "Show section"}
-              onPressedChange={(section) => onViewChange({ section })}
-            >
-              <Scissors aria-hidden="true" />
-            </Toggle>
+            <label className="relative inline-flex cursor-pointer items-center">
+              <input
+                id="section-view"
+                type="checkbox"
+                role="switch"
+                className="peer sr-only"
+                aria-label="Section view"
+                aria-checked={view.section}
+                checked={view.section}
+                onChange={(event) => onViewChange({ section: event.currentTarget.checked })}
+              />
+              <span
+                aria-hidden="true"
+                className="relative h-6 w-11 rounded-full bg-sidebar-foreground/20 transition-colors after:absolute after:left-0.5 after:top-0.5 after:size-5 after:rounded-full after:bg-sidebar after:shadow-sm after:transition-transform peer-checked:bg-primary peer-checked:after:translate-x-5 peer-focus-visible:ring-2 peer-focus-visible:ring-ring"
+              />
+            </label>
           </div>
           {view.section && (
             <>

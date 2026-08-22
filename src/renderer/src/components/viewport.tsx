@@ -59,6 +59,174 @@ const polylines = (lines: Vec3[][]): THREE.BufferGeometry => {
   return result;
 };
 
+interface SectionSegment {
+  start: THREE.Vector2;
+  end: THREE.Vector2;
+  startKey: string;
+  endKey: string;
+}
+
+interface SectionLoop {
+  points: THREE.Vector2[];
+  area: number;
+  parent: number;
+  depth: number;
+}
+
+const pointKey = (point: THREE.Vector2, tolerance: number): string =>
+  `${Math.round(point.x / tolerance)}:${Math.round(point.y / tolerance)}`;
+
+const pointInPolygon = (point: THREE.Vector2, polygon: THREE.Vector2[]): boolean => {
+  let inside = false;
+  for (let index = 0, previous = polygon.length - 1; index < polygon.length; previous = index++) {
+    const currentPoint = polygon[index];
+    const previousPoint = polygon[previous];
+    const crosses = (currentPoint.y > point.y) !== (previousPoint.y > point.y);
+    if (crosses && point.x < ((previousPoint.x - currentPoint.x) * (point.y - currentPoint.y)) / (previousPoint.y - currentPoint.y) + currentPoint.x) {
+      inside = !inside;
+    }
+  }
+  return inside;
+};
+
+/** Intersects a triangulated mesh with the vertical section plane in Y/Z. */
+const sectionSegments = (mesh: CadMesh, cut: number): { segments: SectionSegment[]; tolerance: number } => {
+  const vertices = new Float32Array(mesh.vertices);
+  const triangles = new Uint32Array(mesh.triangles);
+  let span = 0;
+  for (let index = 0; index < vertices.length; index += 3) {
+    span = Math.max(span, Math.abs(vertices[index] - cut));
+  }
+  const tolerance = Math.max(span * 1e-7, 1e-6);
+  const segments: SectionSegment[] = [];
+  const seen = new Set<string>();
+
+  const vertex = (index: number): THREE.Vector3 =>
+    new THREE.Vector3(vertices[index * 3], vertices[index * 3 + 1], vertices[index * 3 + 2]);
+
+  for (let index = 0; index < triangles.length; index += 3) {
+    const points: THREE.Vector2[] = [];
+    const addPoint = (point: THREE.Vector2): void => {
+      if (!points.some((existing) => existing.distanceToSquared(point) <= tolerance * tolerance)) points.push(point);
+    };
+    const triangle = [vertex(triangles[index]), vertex(triangles[index + 1]), vertex(triangles[index + 2])];
+
+    for (let edge = 0; edge < 3; edge += 1) {
+      const first = triangle[edge];
+      const second = triangle[(edge + 1) % 3];
+      const firstDistance = first.x - cut;
+      const secondDistance = second.x - cut;
+      if (Math.abs(firstDistance) <= tolerance) addPoint(new THREE.Vector2(first.y, first.z));
+      if (Math.abs(secondDistance) <= tolerance) addPoint(new THREE.Vector2(second.y, second.z));
+      if ((firstDistance < -tolerance && secondDistance > tolerance) || (firstDistance > tolerance && secondDistance < -tolerance)) {
+        const amount = firstDistance / (firstDistance - secondDistance);
+        addPoint(new THREE.Vector2(
+          first.y + (second.y - first.y) * amount,
+          first.z + (second.z - first.z) * amount
+        ));
+      }
+    }
+
+    if (points.length !== 2) continue;
+    const startKey = pointKey(points[0], tolerance);
+    const endKey = pointKey(points[1], tolerance);
+    if (startKey === endKey) continue;
+    const key = [startKey, endKey].sort().join("|");
+    if (seen.has(key)) continue;
+    seen.add(key);
+    segments.push({ start: points[0], end: points[1], startKey, endKey });
+  }
+
+  return { segments, tolerance };
+};
+
+const sectionLoops = (segments: SectionSegment[], tolerance: number): SectionLoop[] => {
+  const adjacency = new Map<string, number[]>();
+  segments.forEach((segment, index) => {
+    adjacency.set(segment.startKey, [...(adjacency.get(segment.startKey) ?? []), index]);
+    adjacency.set(segment.endKey, [...(adjacency.get(segment.endKey) ?? []), index]);
+  });
+
+  const unused = new Set(segments.map((_, index) => index));
+  const rawLoops: THREE.Vector2[][] = [];
+  while (unused.size > 0) {
+    const firstIndex = unused.values().next().value as number;
+    unused.delete(firstIndex);
+    const first = segments[firstIndex];
+    const startKey = first.startKey;
+    let currentKey = first.endKey;
+    const loop = [first.start.clone(), first.end.clone()];
+    let guard = 0;
+
+    while (currentKey !== startKey && guard < segments.length + 1) {
+      guard += 1;
+      const nextIndex = adjacency.get(currentKey)?.find((candidate) => unused.has(candidate));
+      if (nextIndex === undefined) break;
+      unused.delete(nextIndex);
+      const next = segments[nextIndex];
+      if (next.startKey === currentKey) {
+        loop.push(next.end.clone());
+        currentKey = next.endKey;
+      } else {
+        loop.push(next.start.clone());
+        currentKey = next.startKey;
+      }
+    }
+
+    if (currentKey === startKey) {
+      loop.pop();
+      if (loop.length >= 3 && Math.abs(THREE.ShapeUtils.area(loop)) > tolerance * tolerance) rawLoops.push(loop);
+    }
+  }
+
+  const loops: SectionLoop[] = rawLoops.map((points) => ({
+    points,
+    area: THREE.ShapeUtils.area(points),
+    parent: -1,
+    depth: 0
+  }));
+  const order = loops.map((_, index) => index).sort((a, b) => Math.abs(loops[b].area) - Math.abs(loops[a].area));
+  for (const index of order) {
+    const parent = order.find(
+      (candidate) => candidate !== index && Math.abs(loops[candidate].area) > Math.abs(loops[index].area) && pointInPolygon(loops[index].points[0], loops[candidate].points)
+    );
+    if (parent !== undefined) {
+      loops[index].parent = parent;
+      loops[index].depth = loops[parent].depth + 1;
+    }
+  }
+  return loops;
+};
+
+/** Triangulates the material side of a section, preserving cavity holes. */
+const sectionCapGeometry = (mesh: CadMesh, cut: number): THREE.BufferGeometry => {
+  const { segments, tolerance } = sectionSegments(mesh, cut);
+  const loops = sectionLoops(segments, tolerance);
+  const positions: number[] = [];
+  const normals: number[] = [];
+  const extent = Math.max(tolerance, ...loops.flatMap((loop) => loop.points.map((point) => Math.abs(point.x) + Math.abs(point.y))));
+  const capX = cut - Math.max(extent * 1e-6, 1e-5);
+
+  loops.forEach((outer, outerIndex) => {
+    if (outer.depth % 2 !== 0) return;
+    const holes = loops.filter((loop) => loop.parent === outerIndex);
+    const points = [outer.points, ...holes.map((hole) => hole.points)].flat();
+    const faces = THREE.ShapeUtils.triangulateShape(outer.points, holes.map((hole) => hole.points));
+    for (const [first, second, third] of faces) {
+      for (const pointIndex of [first, second, third]) {
+        const point = points[pointIndex];
+        positions.push(capX, point.x, point.y);
+        normals.push(1, 0, 0);
+      }
+    }
+  });
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setAttribute("normal", new THREE.Float32BufferAttribute(normals, 3));
+  return geometry;
+};
+
 const dispose = (group: THREE.Object3D): void => {
   group.traverse((object) => {
     if (!(object instanceof THREE.Mesh || object instanceof THREE.LineSegments)) return;
@@ -258,6 +426,20 @@ export function Viewport({ preview, plan, view, onSelect }: ViewportProps) {
       lines.name = `${id}-edges`;
       lines.renderOrder = 10;
       solid.add(lines);
+
+      const cap = new THREE.Mesh(
+        new THREE.BufferGeometry(),
+        new THREE.MeshStandardMaterial({
+          color: style.colour,
+          metalness: style.metalness,
+          roughness: style.roughness,
+          side: THREE.DoubleSide
+        })
+      );
+      cap.name = `${id}-section-cap`;
+      cap.renderOrder = 11;
+      cap.visible = false;
+      solid.add(cap);
     }
 
     scene.add(group);
@@ -313,10 +495,16 @@ export function Viewport({ preview, plan, view, onSelect }: ViewportProps) {
 
     applyExplode(group, explodeTravelRef.current, view.explode);
     group.updateMatrixWorld(true);
+    const sources: Record<SceneObjectId, CadMesh> = {
+      part: preview.part,
+      lower: preview.lower,
+      upper: preview.upper
+    };
+    let sectionCut: number | null = null;
 
     if (view.section) {
       const bounds = new THREE.Box3().setFromObject(group);
-      const cut = THREE.MathUtils.lerp(
+      sectionCut = THREE.MathUtils.lerp(
         bounds.min.x,
         bounds.max.x,
         THREE.MathUtils.clamp(view.sectionPosition, 0, 1)
@@ -324,7 +512,7 @@ export function Viewport({ preview, plan, view, onSelect }: ViewportProps) {
       // Three's plane constant is the signed distance from the origin. With
       // this normal, the positive-X side is clipped, leaving a vertical side
       // section as the slider advances through the assembly.
-      sectionPlaneRef.current.set(SECTION_NORMAL, cut);
+      sectionPlaneRef.current.set(SECTION_NORMAL, sectionCut);
       renderer.clippingPlanes = [sectionPlaneRef.current];
     } else {
       renderer.clippingPlanes = [];
@@ -351,6 +539,23 @@ export function Viewport({ preview, plan, view, onSelect }: ViewportProps) {
         lines.material.opacity = transparent ? 0.75 : 0.95;
         lines.material.transparent = transparent;
         lines.material.depthTest = !transparent;
+      }
+
+      const cap = solid.getObjectByName(`${id}-section-cap`) as
+        | THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial>
+        | undefined;
+      if (cap) {
+        cap.visible = sectionCut !== null && opacity > 0;
+        cap.material.opacity = opacity;
+        cap.material.depthWrite = !transparent;
+        if (cap.material.transparent !== transparent) {
+          cap.material.transparent = transparent;
+          cap.material.needsUpdate = true;
+        }
+        if (sectionCut !== null) {
+          cap.geometry.dispose();
+          cap.geometry = sectionCapGeometry(sources[id], sectionCut);
+        }
       }
     }
 
