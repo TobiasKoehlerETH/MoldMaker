@@ -113,11 +113,7 @@ export function Viewport({ preview, plan, view, onSelect }: ViewportProps) {
     controls.screenSpacePanning = true;
     controls.zoomToCursor = true;
 
-    const grid = new THREE.GridHelper(200, 40, 0x7a8490, 0xaab1ba);
-    grid.rotateX(Math.PI / 2);
-    grid.material.transparent = true;
-    grid.material.opacity = 0.22;
-    scene.add(grid, new THREE.HemisphereLight(0xffffff, 0x52606d, 2.1));
+    scene.add(new THREE.HemisphereLight(0xffffff, 0x52606d, 2.1));
     const key = new THREE.DirectionalLight(0xffffff, 3.4);
     key.position.set(70, -90, 120);
     const fill = new THREE.DirectionalLight(0xbfd8ff, 1.4);
@@ -138,7 +134,7 @@ export function Viewport({ preview, plan, view, onSelect }: ViewportProps) {
     invalidateRef.current = invalidate;
     controls.addEventListener("change", invalidate);
 
-    /** Frames an object and parks the grid just under it. */
+    /** Frames an object for the camera. */
     frameRef.current = (object) => {
       const box = new THREE.Box3().setFromObject(object);
       if (box.isEmpty()) return;
@@ -150,7 +146,6 @@ export function Viewport({ preview, plan, view, onSelect }: ViewportProps) {
       const vertical = THREE.MathUtils.degToRad(camera.fov) / 2;
       const horizontal = Math.atan(Math.tan(vertical) * camera.aspect);
       const distance = (radius / Math.sin(Math.min(vertical, horizontal))) * 1.05;
-      grid.position.z = box.min.z - size.z * 0.08;
       controls.target.copy(center);
       camera.position
         .copy(center)
@@ -191,9 +186,6 @@ export function Viewport({ preview, plan, view, onSelect }: ViewportProps) {
       controls.dispose();
       if (modelRef.current) dispose(modelRef.current);
       if (planRef.current) dispose(planRef.current);
-      grid.geometry.dispose();
-      const gridMaterials = Array.isArray(grid.material) ? grid.material : [grid.material];
-      gridMaterials.forEach((material) => material.dispose());
       renderer.dispose();
       frameRef.current = () => undefined;
       sceneRef.current = null;

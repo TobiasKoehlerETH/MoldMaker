@@ -71,15 +71,22 @@ export function splitAxis(part: PartModel): SplitAxis {
 /**
  * Outer bounds of the block: the cavity plus the wall, grown by the padding.
  *
+ * Each axis is then rounded up to a whole millimetre — the extra material is
+ * split evenly across the two sides — so the block never carries fractional
+ * sizes like 54.002 mm.
+ *
  * The preview plan and the CAD kernel both size the block from this, so an
  * inspector-set outer size lands identically in the wireframe and the solids.
  */
 export const moldBounds = (cavityMin: Vec3, cavityMax: Vec3, params: MoldParams): [Vec3, Vec3] => {
   const margin = (axis: number): number => params.wallThickness + params.padding[axis] / 2;
-  return [
-    cavityMin.map((value, axis) => value - margin(axis)) as Vec3,
-    cavityMax.map((value, axis) => value + margin(axis)) as Vec3
-  ];
+  const min = cavityMin.map((value, axis) => value - margin(axis)) as Vec3;
+  const max = cavityMax.map((value, axis) => value + margin(axis)) as Vec3;
+  const grown = max.map((value, axis) => {
+    const extra = Math.ceil(value - min[axis] - 1e-6) - (value - min[axis]);
+    return { min: min[axis] - extra / 2, max: value + extra / 2 };
+  });
+  return [grown.map((side) => side.min) as Vec3, grown.map((side) => side.max) as Vec3];
 };
 
 /**
@@ -223,7 +230,10 @@ export function buildMold(part: PartModel, params: MoldParams): Mold {
     gateRange: gateRangeOf(cavityMin, cavityMax, params.injectionDiameter),
     splitRange: splitRangeOf(partEdges.flat(), cavityMin, cavityMax),
     size: max.map((value, index) => value - min[index]) as Vec3,
-    minSize: cavityMax.map((value, index) => value - cavityMin[index] + 2 * wall) as Vec3
+    // Size at zero padding: the smallest block the wall allows, in whole mm.
+    minSize: cavityMax.map(
+      (value, index) => Math.ceil(value - cavityMin[index] + 2 * wall - 1e-6)
+    ) as Vec3
   };
 }
 

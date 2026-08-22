@@ -248,3 +248,13 @@ files. The `CadMesh` contract now has one additive `edges: ArrayBuffer` field,
 filled from OpenCascade `meshEdges()`. This is the exact topological edge stream
 requested by the user and avoids exposing tessellation facets as CAD edges; the
 renderer may consume or ignore it. Faces remain Float32/Float32/Uint32 buffers.
+
+## Log
+
+- viewport agent: fresh STEP/project loads now show a spinner in the viewport
+  instead of the envelope wireframe (plan only draws when previous solids are
+  still on screen). Finished the half-applied App.tsx refactor against the
+  current cad API (GeneratedState now holds \preview: CadPreview\, export goes
+  through \exportMoldFiles\), and fixed \post()\ in \src/renderer/src/cad.ts\
+  to distribute \Omit\ over the request union. Note: an earlier \git stash\/
+  pop race with concurrent edits was resolved; a stale stash entry may remain.

@@ -19,7 +19,13 @@ describe("RTV mold plan", () => {
     const wall = DEFAULT_PARAMS.wallThickness;
 
     expect(mold.size).toEqual(mold.minSize);
-    mold.size.forEach((span, axis) => expect(span).toBeCloseTo(max[axis] - min[axis] + 2 * wall, 6));
+    mold.size.forEach((span, axis) => {
+      // Whole millimetres, grown past the cavity plus the wall but never by a full one.
+      const exact = max[axis] - min[axis] + 2 * wall;
+      expect(span).toBe(Math.round(span));
+      expect(span).toBeGreaterThanOrEqual(exact - 1e-6);
+      expect(span).toBeLessThan(exact + 1);
+    });
   });
 
   it("grows the block by the requested padding, keeping the cavity centred", () => {

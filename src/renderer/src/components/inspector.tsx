@@ -1,12 +1,11 @@
 import { useState } from "react";
-import { Crosshair, Eye, EyeOff, Minimize2, PanelLeftClose, RotateCcw } from "lucide-react";
+import { Eye, EyeOff, PanelLeftClose } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
   SidebarContent,
   SidebarGroup,
-  SidebarGroupAction,
   SidebarGroupContent,
   SidebarGroupLabel,
   SidebarHeader,
@@ -119,9 +118,6 @@ function NumberField({ id, label, name = label, value, step, min, max, unit, onC
 }
 
 function MoldPanel({ params, mold, onChange }: Pick<InspectorProps, "params" | "mold" | "onChange">) {
-  const padded = params.padding.some((value) => value > 0);
-  const moved = params.gateOffset.some((value) => value !== 0);
-
   return (
     <>
       <SidebarGroup>
@@ -150,15 +146,6 @@ function MoldPanel({ params, mold, onChange }: Pick<InspectorProps, "params" | "
           minimum hands it back to the wall. */}
       <SidebarGroup>
         <SidebarGroupLabel>Block size</SidebarGroupLabel>
-        <SidebarGroupAction
-          aria-label="Shrink block to the wall"
-          title="Shrink block to the wall"
-          disabled={!padded}
-          className="disabled:opacity-40"
-          onClick={() => onChange({ padding: [0, 0, 0] })}
-        >
-          <Minimize2 />
-        </SidebarGroupAction>
         <SidebarGroupContent className="space-y-2 px-2 pb-2">
           {mold ? (
             AXES.map((axis, index) => (
@@ -191,15 +178,6 @@ function MoldPanel({ params, mold, onChange }: Pick<InspectorProps, "params" | "
           on the topmost surface under wherever these put it. */}
       <SidebarGroup>
         <SidebarGroupLabel>Port position</SidebarGroupLabel>
-        <SidebarGroupAction
-          aria-label="Centre port"
-          title="Centre port"
-          disabled={!moved}
-          className="disabled:opacity-40"
-          onClick={() => onChange({ gateOffset: [0, 0] })}
-        >
-          <Crosshair />
-        </SidebarGroupAction>
         <SidebarGroupContent className="space-y-2 px-2 pb-2">
           {mold ? (
             <>
@@ -221,12 +199,6 @@ function MoldPanel({ params, mold, onChange }: Pick<InspectorProps, "params" | "
                   }}
                 />
               ))}
-              <div className="flex justify-between gap-3 pt-1 text-xs text-sidebar-foreground/65">
-                <span>Meets part at</span>
-                <span className="text-right tabular-nums text-sidebar-foreground">
-                  {mold.gate.map(format).join(" · ")} mm
-                </span>
-              </div>
             </>
           ) : (
             <p className="text-xs text-sidebar-foreground/55">Import a part to move the port.</p>
@@ -240,15 +212,6 @@ function MoldPanel({ params, mold, onChange }: Pick<InspectorProps, "params" | "
           is worth scrubbing rather than typing. */}
       <SidebarGroup>
         <SidebarGroupLabel>Parting line</SidebarGroupLabel>
-        <SidebarGroupAction
-          aria-label="Automatic parting line"
-          title="Automatic parting line"
-          disabled={params.splitOffset === 0}
-          className="disabled:opacity-40"
-          onClick={() => onChange({ splitOffset: 0 })}
-        >
-          <RotateCcw />
-        </SidebarGroupAction>
         <SidebarGroupContent className="space-y-3 px-2 pb-2">
           {mold ? (
             <>

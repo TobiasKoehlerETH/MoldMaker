@@ -169,12 +169,15 @@ input[type="number"]::-webkit-outer-spin-button { margin: 0; appearance: none; }
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 14px;
+  gap: 6px;
 }
 
 .empty-state button { pointer-events: auto; }
 .empty-icon { display: grid; place-items: center; width: 76px; height: 76px; color: var(--muted-foreground); }
 .empty-icon svg { width: 48px; height: 48px; stroke-width: 1; }
+.empty-title { font-size: 16px; font-weight: 500; letter-spacing: -0.01em; }
+.empty-tagline { color: var(--muted-foreground); font-size: 12px; }
+.empty-actions { display: flex; gap: 8px; margin-top: 12px; }
 
 .body-menu {
   position: absolute;

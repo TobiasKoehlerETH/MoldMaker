@@ -13,11 +13,34 @@ import {
   type SimplePoint,
   Vector
 } from "replicad";
-import type { CadMesh, GenerateMoldRequest, GenerateMoldResponse, GeneratedMold } from "../../shared/cad";
-import { flowPorts, moldBounds, partingLevel, screwPoints } from "../../shared/mold";
+import type { CadMesh, CadPreview, CadRequest, CadResponse, GeneratedFile, GenerateMoldRequest } from "../../shared/cad";
+import { flowPorts, moldBounds, partingLevel, screwPoints, type SplitAxis } from "../../shared/mold";
 import type { Vec3 } from "../../shared/vec3";
 
 const ready = initOpenCascade({ locateFile: () => openCascadeWasm }).then(setOC);
+
+/**
+ * Everything derived from the imported STEP file alone: its solids in the
+ * split orientation, sampled surface points, bounds, and preview mesh.
+ *
+ * Re-importing and re-meshing per settings change dominated rebuild time, so
+ * the worker keeps the last part alive and rebuilds only what the parameters
+ * moved. The preview mesh buffers stay untransferred so they survive replies.
+ */
+interface LoadedPart {
+  axis: SplitAxis;
+  shape: Shape3D;
+  solids: Shape3D[];
+  surface: Vec3[];
+  min: Vec3;
+  max: Vec3;
+  previewMesh: CadMesh;
+}
+
+let loadedPart: LoadedPart | null = null;
+
+/** The most recent completed halves, kept alive so Export can encode on demand. */
+let halves: { lower: Shape3D; upper: Shape3D } | null = null;
 
 /** OpenCascade comparisons scaled to the generated mold's envelope. */
 const geometryTolerance = (min: SimplePoint, max: SimplePoint): number =>
@@ -230,21 +253,40 @@ function mesh(shape: Shape3D): CadMesh {
   };
 }
 
-async function generate({ step, params, splitAxis }: GenerateMoldRequest): Promise<GeneratedMold> {
-  await ready;
-  let part = (await importSTEP(new Blob([step]))).asShape3D();
-  part = rotateToZ(part, splitAxis);
-
+async function meshPart(step: ArrayBuffer, axis: SplitAxis): Promise<LoadedPart> {
+  const part = rotateToZ((await importSTEP(new Blob([step]))).asShape3D(), axis);
   const [partMin, partMax] = part.boundingBox.bounds;
-  const wall = params.wallThickness;
-  const [min, max] = moldBounds(partMin as Vec3, partMax as Vec3, params) as [SimplePoint, SimplePoint];
-  const surface = points(part.mesh({ tolerance: 0.2 }).vertices) as Vec3[];
-  const splitZ = partingLevel(surface, partMin as Vec3, partMax as Vec3, params.splitOffset);
-  const partSolids = solidsOf(part);
-  let lower = cutPart(makeBox(min, [max[0], max[1], splitZ]), partSolids);
-  let upper = cutPart(makeBox([min[0], min[1], splitZ], max), partSolids);
+  return {
+    axis,
+    shape: part,
+    solids: solidsOf(part),
+    surface: points(part.mesh({ tolerance: 0.2 }).vertices) as Vec3[],
+    min: partMin as Vec3,
+    max: partMax as Vec3,
+    previewMesh: mesh(part)
+  };
+}
 
-  [lower, upper] = moveSeamCores(lower, upper, partSolids, min, max, partMin[2], splitZ);
+async function generate({ step, params, splitAxis }: GenerateMoldRequest): Promise<CadPreview> {
+  await ready;
+  // A request without STEP bytes rebuilds the part already held, so a settings
+  // change pays only for what the parameters moved.
+  if (step) {
+    if (loadedPart) {
+      loadedPart.solids.forEach((solid) => solid.delete());
+      loadedPart.shape.delete();
+    }
+    loadedPart = await meshPart(step, splitAxis);
+  }
+  if (!loadedPart) throw new Error("No part is open");
+  const part = loadedPart;
+
+  const [min, max] = moldBounds(part.min, part.max, params) as [SimplePoint, SimplePoint];
+  const splitZ = partingLevel(part.surface, part.min, part.max, params.splitOffset);
+  let lower = cutPart(makeBox(min, [max[0], max[1], splitZ]), part.solids);
+  let upper = cutPart(makeBox([min[0], min[1], splitZ], max), part.solids);
+
+  [lower, upper] = moveSeamCores(lower, upper, part.solids, min, max, part.min[2], splitZ);
 
   // Hand each half the cores it must carry so both stay exact negatives of the
   // part: first the fill of any pocket opening at the parting plane, then any
@@ -254,48 +296,60 @@ async function generate({ step, params, splitAxis }: GenerateMoldRequest): Promi
 
   // Screw clearance holes span the whole height so a bolt passes through both
   // halves. `cut` leaves its tool intact, so one cylinder serves both cuts.
-  for (const [x, y] of screwPoints(min, max, wall, params.screwDiameter)) {
+  for (const [x, y] of screwPoints(min, max, params.wallThickness, params.screwDiameter)) {
     const bore = makeCylinder(params.screwDiameter / 2, max[2] - min[2] + 2, [x, y, min[2] - 1]);
     lower = replace(lower, lower.cut(bore));
     upper = replace(upper, upper.cut(bore));
     bore.delete();
   }
 
-  const { gate, vents } = flowPorts(surface, partMin as Vec3, partMax as Vec3, params.gateOffset);
+  const { gate, vents } = flowPorts(part.surface, part.min, part.max, params.gateOffset);
   for (const [point, diameter] of [[gate, params.injectionDiameter], ...vents.map((point) => [point, params.ventDiameter] as const)] as const) {
     const channel = makeCylinder(diameter / 2, max[2] - point[2] + 0.5, [point[0], point[1], point[2] - 0.25]);
     upper = replace(upper, upper.cut(channel));
   }
 
-  const exports = [
-    ["lower-step", lower.blobSTEP()],
-    ["upper-step", upper.blobSTEP()],
-    ["lower-stl", lower.blobSTL({ binary: true, tolerance: 0.05 })],
-    ["upper-stl", upper.blobSTL({ binary: true, tolerance: 0.05 })]
-  ] as const;
-  const [files, preview] = await Promise.all([
-    Promise.all(exports.map(async ([kind, blob]) => ({ kind, data: await blob.arrayBuffer() }))),
-    Promise.resolve({ part: mesh(part), lower: mesh(lower), upper: mesh(upper) })
-  ]);
-  partSolids.forEach((solid) => solid.delete());
-  part.delete();
-  lower.delete();
-  upper.delete();
-  return { files, preview };
+  halves?.lower.delete();
+  halves?.upper.delete();
+  // Kept alive past this reply so Export encodes from the solids on screen
+  // instead of every rebuild paying for four file conversions nobody asked for.
+  halves = { lower, upper };
+  return { part: part.previewMesh, lower: mesh(lower), upper: mesh(upper) };
 }
 
-self.onmessage = async ({ data }: MessageEvent<GenerateMoldRequest>) => {
-  let response: GenerateMoldResponse;
+/** Encodes the current halves into their STEP and STL files. */
+async function exportHalves(): Promise<GeneratedFile[]> {
+  await ready;
+  if (!halves) throw new Error("Build a mold before exporting");
+  const exports = [
+    ["lower-step", halves.lower.blobSTEP()],
+    ["upper-step", halves.upper.blobSTEP()],
+    ["lower-stl", halves.lower.blobSTL({ binary: true, tolerance: 0.05 })],
+    ["upper-stl", halves.upper.blobSTL({ binary: true, tolerance: 0.05 })]
+  ] as const;
+  return Promise.all(exports.map(async ([kind, blob]) => ({ kind, data: await blob.arrayBuffer() })));
+}
+
+self.onmessage = async ({ data }: MessageEvent<CadRequest>) => {
   try {
-    response = { id: data.id, ok: true, result: await generate(data) };
+    if (data.kind === "export") {
+      const files = await exportHalves();
+      self.postMessage({ id: data.id, ok: true, files } satisfies CadResponse, {
+        transfer: files.map((file) => file.data)
+      });
+      return;
+    }
+    const preview = await generate(data);
+    // The part's preview mesh belongs to the cache, so only the rebuilt halves'
+    // buffers travel; the part mesh is structured-cloned instead.
+    const transfers = [preview.lower, preview.upper].flatMap((mesh) => [
+      mesh.vertices,
+      mesh.normals,
+      mesh.triangles,
+      mesh.edges
+    ]);
+    self.postMessage({ id: data.id, ok: true, preview } satisfies CadResponse, { transfer: transfers });
   } catch (error) {
-    response = { id: data.id, ok: false, error: error instanceof Error ? error.message : "Mold generation failed" };
+    self.postMessage({ id: data.id, ok: false, error: error instanceof Error ? error.message : "Mold generation failed" } satisfies CadResponse);
   }
-  const transfers = response.ok
-    ? [
-        ...response.result.files.map((file) => file.data),
-        ...Object.values(response.result.preview).flatMap((mesh) => [mesh.vertices, mesh.normals, mesh.triangles, mesh.edges])
-      ]
-    : [];
-  self.postMessage(response, { transfer: transfers });
 };

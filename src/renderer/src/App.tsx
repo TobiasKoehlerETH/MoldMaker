@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Box, Download, FolderOpen, LoaderCircle, Save, ScanLine, SlidersHorizontal, Upload } from "lucide-react";
+import { Box, Download, FolderOpen, LoaderCircle, PanelLeftClose, PanelLeftOpen, Save, ScanLine, SlidersHorizontal, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Inspector } from "@/components/inspector";
 import { VisibilityMenu } from "@/components/visibility-menu";
@@ -15,10 +15,11 @@ import {
   SidebarMenuItem,
   SidebarProvider
 } from "@/components/ui/sidebar";
+import { cn } from "@/lib/utils";
 import { BUILDING, useAppStore } from "@/store/app-store";
 import { DEFAULT_VIEW, type BodySelection, type SceneObjectId, type ViewState } from "@/viewport/modes";
-import { generateMold } from "@/cad";
-import type { GeneratedMold } from "../../shared/cad";
+import { exportMoldFiles, generateMold } from "@/cad";
+import type { CadPreview } from "../../shared/cad";
 import type { NativeResult } from "../../shared/electron-api";
 import { buildMold, DEFAULT_PARAMS, moldWireframe, type MoldParams } from "../../shared/mold";
 import { baseName, decodeProject, encodeProject } from "../../shared/project";
@@ -33,9 +34,10 @@ interface ToolButtonProps {
 }
 
 interface GeneratedState {
-  source: string;
+  /** Encoded STEP of the part the preview was built from. */
+  source: Uint8Array;
   params: MoldParams;
-  result: GeneratedMold;
+  preview: CadPreview;
 }
 
 type SidebarPanel = "mold" | "view";
@@ -70,33 +72,39 @@ export function App() {
   const finishBuild = useAppStore((state) => state.finishBuild);
 
   const [version, setVersion] = useState("");
+  const [railOpen, setRailOpen] = useState(true);
   const [sidebarPanel, setSidebarPanel] = useState<SidebarPanel | null>("mold");
   const [view, setView] = useState<ViewState>(DEFAULT_VIEW);
   const [selection, setSelection] = useState<BodySelection | null>(null);
   const [generated, setGenerated] = useState<GeneratedState | null>(null);
   const mold = useMemo(() => (part ? buildMold(part, params) : null), [part, params]);
-  const ready = generated?.source === source && generated.params === params ? generated.result : null;
+  // Encoded once per file: rebuilds pass the same array so the worker keeps
+  // its imported part and no bytes travel.
+  const encodedSource = useMemo(() => (source ? new TextEncoder().encode(source) : null), [source]);
+  const ready = generated?.source === encodedSource && generated.params === params ? generated.preview : null;
   // The last solids stay on screen while the next ones build: a settings change
   // should refine the model in place, not blank the viewport and re-frame it.
-  const preview = generated?.result.preview ?? null;
+  const preview = generated?.preview ?? null;
   // Wireframe of the envelope and ports, drawn only while the solids are behind
-  // the settings, so an edit shows up immediately.
-  const plan = useMemo(() => (mold && !ready ? moldWireframe(mold) : null), [mold, ready]);
+  // the settings, so an edit shows up immediately. A fresh load has no solids
+  // yet; it gets a spinner instead of an empty envelope outline.
+  const plan = useMemo(() => (mold && preview && !ready ? moldWireframe(mold) : null), [mold, preview, ready]);
   const busy = status.endsWith("…");
+  const loading = busy && !preview;
 
   useEffect(() => {
     void window.moldMaker.getAppInfo().then((info) => setVersion(info.version));
   }, []);
 
   useEffect(() => {
-    if (!part || !mold || !source) return;
+    if (!part || !mold || !encodedSource) return;
     let current = true;
     const timer = window.setTimeout(() => {
       setStatus(BUILDING);
-      void generateMold(new TextEncoder().encode(source), params, mold.splitAxis)
-        .then((result) => {
+      void generateMold(encodedSource, params, mold.splitAxis)
+        .then((preview) => {
           if (!current) return;
-          setGenerated({ source, params, result });
+          setGenerated({ source: encodedSource, params, preview });
           finishBuild("Mold ready · 2 print halves");
         })
         .catch((error: unknown) => {
@@ -110,7 +118,7 @@ export function App() {
       current = false;
       window.clearTimeout(timer);
     };
-  }, [finishBuild, mold, params, part, setStatus, source]);
+  }, [encodedSource, finishBuild, mold, params, part, setStatus]);
 
   const setVisibility = useCallback((id: SceneObjectId, value: ViewState["objects"][SceneObjectId]): void => {
     setView((current) => ({ ...current, objects: { ...current.objects, [id]: value } }));
@@ -171,19 +179,25 @@ export function App() {
     );
   }
 
+  /** Encodes the current halves on demand and hands the files to the user. */
   async function exportMold(): Promise<void> {
     if (!ready) return;
     setStatus("Exporting…");
-    const stem = `${baseName(fileName ?? "mold")}-mold`;
-    await run(
-      window.moldMaker.exportFiles({
-        files: ready.files.map(({ kind, data }) => {
-          const [side, extension] = kind.split("-");
-          return { name: `${stem}-${side}.${extension}`, data: new Uint8Array(data) };
-        })
-      }),
-      () => "Exported STEP and STL halves"
-    );
+    try {
+      const files = await exportMoldFiles();
+      const stem = `${baseName(fileName ?? "mold")}-mold`;
+      await run(
+        window.moldMaker.exportFiles({
+          files: files.map(({ kind, data }) => {
+            const [side, extension] = kind.split("-");
+            return { name: `${stem}-${side}.${extension}`, data: new Uint8Array(data) };
+          })
+        }),
+        () => "Exported STEP and STL halves"
+      );
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "The export failed");
+    }
   }
 
   function toggleSidebar(panel: SidebarPanel): void {
@@ -192,11 +206,22 @@ export function App() {
 
   return (
     <SidebarProvider className="h-full min-h-0" style={{ "--sidebar-width": "18rem" } as React.CSSProperties}>
-      <Sidebar collapsible="none" className="w-12 border-r border-sidebar-border" aria-label="Mold tools">
+      <Sidebar
+        collapsible="none"
+        aria-hidden={!railOpen}
+        aria-label="Mold tools"
+        className={cn(
+          "border-r border-sidebar-border transition-[width,visibility] duration-300 ease-in-out motion-reduce:transition-none",
+          railOpen ? "visible w-12" : "invisible w-0 overflow-hidden border-r-0"
+        )}
+      >
         <SidebarContent>
-          <SidebarGroup className="px-1 py-2">
+          <SidebarGroup className="w-12 px-1 py-2">
             <SidebarGroupContent>
               <SidebarMenu>
+                <ToolButton label={railOpen ? "Hide tools" : "Show tools"} onClick={() => setRailOpen((open) => !open)}>
+                  {railOpen ? <PanelLeftClose /> : <PanelLeftOpen />}
+                </ToolButton>
                 <ToolButton label="Import STEP" onClick={importStep}>
                   <Upload />
                 </ToolButton>
@@ -222,23 +247,31 @@ export function App() {
         </SidebarContent>
       </Sidebar>
 
-      {sidebarPanel && part && (
+      {part && (
         <Sidebar
           collapsible="none"
-          className="w-72 border-r border-sidebar-border"
+          aria-hidden={!sidebarPanel}
           role="complementary"
-          aria-label={sidebarPanel === "mold" ? "Mold settings" : "View settings"}
+          aria-label={sidebarPanel === "view" ? "View settings" : "Mold settings"}
+          className={cn(
+            "border-r border-sidebar-border transition-[width,visibility] duration-300 ease-in-out motion-reduce:transition-none",
+            sidebarPanel ? "visible w-72" : "invisible w-0 overflow-hidden border-r-0"
+          )}
         >
-          <Inspector
-            section={sidebarPanel}
-            params={params}
-            mold={mold}
-            view={view}
-            onChange={setParams}
-            onViewChange={(patch) => setView((current) => ({ ...current, ...patch }))}
-            onToggleObject={toggleObject}
-            onCollapse={() => setSidebarPanel(null)}
-          />
+          {/* Fixed-width inner column so the settings reflow never shows while
+              the panel's width animates. */}
+          <div className={cn("flex h-full w-72 flex-col", !sidebarPanel && "pointer-events-none")}>
+            <Inspector
+              section={sidebarPanel ?? "mold"}
+              params={params}
+              mold={mold}
+              view={view}
+              onChange={setParams}
+              onViewChange={(patch) => setView((current) => ({ ...current, ...patch }))}
+              onToggleObject={toggleObject}
+              onCollapse={() => setSidebarPanel(null)}
+            />
+          </div>
         </Sidebar>
       )}
 
@@ -268,6 +301,19 @@ export function App() {
           <div className="viewport-grid" />
           <Viewport preview={preview} plan={plan} view={view} onSelect={setSelection} />
 
+          {!railOpen && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="absolute left-2 top-2 z-10 text-muted-foreground hover:text-foreground"
+              aria-label="Show tools"
+              title="Show tools"
+              onClick={() => setRailOpen(true)}
+            >
+              <PanelLeftOpen />
+            </Button>
+          )}
+
           {selection && (
             <VisibilityMenu
               selection={selection}
@@ -285,10 +331,24 @@ export function App() {
               <div className="empty-icon">
                 <Box aria-hidden="true" />
               </div>
-              <Button onClick={importStep}>
-                <Upload /> STEP
-              </Button>
+              <h1 className="empty-title">MoldMaker</h1>
+              <p className="empty-tagline">Turn a STEP model into a printable two-part mold.</p>
+              <div className="empty-actions">
+                <Button onClick={importStep}>
+                  <Upload /> Import STEP
+                </Button>
+                <Button variant="outline" onClick={openProject}>
+                  <FolderOpen /> Open project
+                </Button>
+              </div>
             </section>
+          )}
+
+          {loading && (
+            /* Status is already announced by the header indicator; this is only the large visual. */
+            <div className="empty-state" aria-hidden="true">
+              <LoaderCircle className="size-8 animate-spin text-muted-foreground" />
+            </div>
           )}
         </section>
 
