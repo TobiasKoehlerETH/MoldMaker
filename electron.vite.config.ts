@@ -4,7 +4,13 @@ import react from "@vitejs/plugin-react";
 import { defineConfig } from "electron-vite";
 
 export default defineConfig({
-  main: {},
+  main: {
+    // Bundle main-process validation code so the packaged app has no
+    // production node_modules tree to ship alongside the asar.
+    build: {
+      externalizeDeps: false
+    }
+  },
   preload: {
     // Sandboxed preload scripts cannot resolve Node's module loader. Bundle
     // shared runtime dependencies (such as the IPC contract's zod import)
