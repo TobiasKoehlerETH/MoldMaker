@@ -67,6 +67,7 @@
   "build": {
     "appId": "com.moldmaker.desktop",
     "productName": "MoldMaker",
+    "icon": "assets/icon.ico",
     "asar": true,
     "directories": {
       "output": "release"
@@ -76,7 +77,8 @@
       "package.json"
     ],
     "win": {
-      "target": "nsis"
+      "target": "nsis",
+      "icon": "assets/icon.ico"
     },
     "nsis": {
       "oneClick": false,

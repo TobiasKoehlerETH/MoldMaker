@@ -4,6 +4,8 @@ release/
 coverage/
 playwright-report/
 test-results/
+.firecrawl/
+docs/code-graph/
 *.log
 .DS_Store
 Thumbs.db

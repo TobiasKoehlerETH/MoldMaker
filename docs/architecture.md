@@ -3,7 +3,7 @@
 MoldMaker is an offline Electron desktop application that turns a STEP part into
 a printable two-part casting mold. Importing a STEP file produces a cavity block
 split into a base and a top half, with an injection gate, air vents, and
-registration pins, previewed in 3D and exported as STEP and STL for each half.
+clamping screw holes, previewed in 3D and exported as STEP and STL for each half.
 
 Everything runs locally. There are no network calls at runtime, and the CAD
 kernel ships as a WebAssembly bundle inside the app.
@@ -48,7 +48,7 @@ would otherwise freeze the UI. The worker owns the only OpenCascade instance.
 | Preload | `src/preload/index.ts` | Exposes the minimal `window.moldMaker` API through `contextBridge`. |
 | Native contract | `src/shared/electron-api.ts` | IPC channel names, request validation, response types, and the renderer-facing API. |
 | STEP reader | `src/shared/step.ts` | Minimal ISO 10303-21 parser; tessellates edge curves and reports bounds and cylindrical bores. |
-| Mold plan | `src/shared/mold.ts` | Parameter schema and the fast preview plan: split axis, wall, gate, vents, and pins. |
+| Mold plan | `src/shared/mold.ts` | Parameter schema and the fast preview plan: split axis, wall, gate, vents, and screw holes. |
 | CAD contract | `src/shared/cad.ts` | Worker request/response types, including the preview meshes. |
 | Project file | `src/shared/project.ts` | `.moldmaker` serialisation; embeds the STEP source so a project reopens standalone. |
 | Vector maths | `src/shared/vec3.ts` | Shared vector helpers, bounding boxes, and planar distance. |
@@ -74,10 +74,10 @@ would otherwise freeze the UI. The worker owns the only OpenCascade instance.
 Changing a parameter schedules a rebuild after a 250 ms debounce. The renderer
 sends the STEP source and parameters to the CAD worker, which imports the solid,
 orients the split axis to Z, applies shrinkage, cuts the cavity out of two boxes,
-adds registration pins and flow channels, then returns four export blobs and
+adds clamping screw holes and flow channels, then returns four export blobs and
 three display meshes. `src/shared/mold.ts` computes the same plan cheaply for the
 wireframe preview, so both use one set of rules via `flowPorts` and
-`registrationPins`.
+`screwPoints`.
 
 ### Save, reopen, and export
 
@@ -103,7 +103,7 @@ left out of the scene entirely, so they are neither drawn nor clickable.
 npm run check      # typecheck, lint, unit tests, production build
 npm run dev        # local Electron development
 npm run test:e2e   # Playwright drives the packaged app and writes feedback
-npm run codegraph  # refresh docs/code-graph/*
+npm run codegraph  # regenerate the ignored docs/code-graph/* files
 ```
 
 Unit tests under `tests/` cover the STEP reader, the mold plan, the project file,
