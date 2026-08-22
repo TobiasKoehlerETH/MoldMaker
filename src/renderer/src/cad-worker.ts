@@ -34,7 +34,7 @@ interface LoadedPart {
   surface: Vec3[];
   min: Vec3;
   max: Vec3;
-  previewMesh: CadMesh;
+  previewMesh: CadMesh | null;
 }
 
 let loadedPart: LoadedPart | null = null;
@@ -275,7 +275,7 @@ function mesh(shape: Shape3D): CadMesh {
   };
 }
 
-async function meshPart(step: ArrayBuffer, axis: SplitAxis): Promise<LoadedPart> {
+async function meshPart(step: ArrayBuffer, axis: SplitAxis, shrinkageScale: number): Promise<LoadedPart> {
   const part = rotateToZ((await importSTEP(new Blob([step]))).asShape3D(), axis);
   const [partMin, partMax] = part.boundingBox.bounds;
   return {
@@ -285,7 +285,9 @@ async function meshPart(step: ArrayBuffer, axis: SplitAxis): Promise<LoadedPart>
     surface: points(part.mesh({ tolerance: 0.2 }).vertices) as Vec3[],
     min: partMin as Vec3,
     max: partMax as Vec3,
-    previewMesh: mesh(part)
+    // A non-zero shrinkage setting immediately replaces this mesh with the
+    // scaled preview, so avoid tessellating the unscaled part unnecessarily.
+    previewMesh: shrinkageScale === 0 ? mesh(part) : null
   };
 }
 
@@ -295,6 +297,8 @@ function preparePart(source: LoadedPart, shrinkageScale: number): PreparedPart {
 
   releasePreparedPart();
   if (factor === 1) {
+    const previewMesh = source.previewMesh ?? mesh(source.shape);
+    source.previewMesh = previewMesh;
     preparedPart = {
       source,
       scale: factor,
@@ -302,7 +306,7 @@ function preparePart(source: LoadedPart, shrinkageScale: number): PreparedPart {
       surface: source.surface,
       min: source.min,
       max: source.max,
-      previewMesh: source.previewMesh
+      previewMesh
     };
     return preparedPart;
   }
@@ -344,7 +348,7 @@ async function generate({ step, params, splitAxis }: GenerateMoldRequest): Promi
       loadedPart.solids.forEach((solid) => solid.delete());
       loadedPart.shape.delete();
     }
-    loadedPart = await meshPart(step, splitAxis);
+    loadedPart = await meshPart(step, splitAxis, params.shrinkageScale);
   }
   if (!loadedPart) throw new Error("No part is open");
   const part = preparePart(loadedPart, params.shrinkageScale);

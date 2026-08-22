@@ -42,7 +42,7 @@ test("imports, edits, saves, reloads, and exports a mold", async ({ electronApp,
   await expect(appPage.getByText("sample.STEP", { exact: true })).toBeVisible();
   await expect(appPage.getByRole("status")).toBeVisible();
   await expect(appPage.getByRole("button", { name: "Save project" })).toBeEnabled();
-  await expect(appPage.getByRole("complementary", { name: "Mold settings" })).toBeVisible();
+  await expect(appPage.getByRole("complementary", { name: "Settings" })).toBeVisible();
   await expect(appPage.getByRole("button", { name: "Export mold" })).toBeEnabled({ timeout: 60_000 });
   await expect(appPage.getByRole("status")).toHaveCount(0);
 
@@ -73,8 +73,9 @@ test("imports, edits, saves, reloads, and exports a mold", async ({ electronApp,
   await expect(parting).toHaveAttribute("aria-valuenow", "0");
   await expect(appPage.getByRole("button", { name: "Export mold" })).toBeEnabled({ timeout: 60_000 });
 
-  await appPage.getByRole("button", { name: "View settings" }).click();
-  await expect(appPage.getByRole("complementary", { name: "View settings" })).toBeVisible();
+  await expect(appPage.getByRole("complementary", { name: "Settings" })).toBeVisible();
+  await expect(appPage.getByText("Objects", { exact: true })).toBeVisible();
+  await expect(appPage.getByText("Explode", { exact: true })).toBeVisible();
 
   // One eye per body and one explode slider: nothing else to get wrong.
   const topHalf = appPage.getByRole("button", { name: "Top half visibility" });
@@ -107,8 +108,7 @@ test("imports, edits, saves, reloads, and exports a mold", async ({ electronApp,
   await menu.getByRole("button", { name: "Solid" }).click();
   await expect(menu).toBeHidden();
 
-  await appPage.getByRole("button", { name: "Mold settings" }).click();
-  await expect(appPage.getByRole("complementary", { name: "Mold settings" })).toBeVisible();
+  await expect(appPage.getByRole("complementary", { name: "Settings" })).toBeVisible();
 
   await selectSavePath(electronApp, projectPath);
   await appPage.getByRole("button", { name: "Save project" }).click();

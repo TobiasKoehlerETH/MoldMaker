@@ -36,9 +36,15 @@ export interface ViewState {
   objects: Record<SceneObjectId, Visibility>;
   /** Separation of the halves, as a fraction of the mold's largest dimension. */
   explode: number;
+  /** Whether the assembly is clipped at the section plane. */
+  section: boolean;
+  /** Section-plane position as a fraction of the current assembly's X bounds. */
+  sectionPosition: number;
 }
 
 export const DEFAULT_VIEW: ViewState = {
   objects: { part: "solid", lower: "solid", upper: "solid" },
-  explode: 1
+  explode: 1,
+  section: false,
+  sectionPosition: 0.5
 };

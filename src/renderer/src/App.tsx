@@ -1,16 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Download, FolderOpen, Save, ScanLine, SlidersHorizontal, Upload } from "lucide-react";
+import { Download, FolderOpen, LoaderCircle, Save, Settings2, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Inspector } from "@/components/inspector";
 import { VisibilityMenu } from "@/components/visibility-menu";
 import { Viewport } from "@/components/viewport";
 import {
   Sidebar,
-  SidebarContent,
   SidebarGroup,
   SidebarGroupContent,
-  SidebarGroupLabel,
-  SidebarHeader,
   SidebarInset,
   SidebarMenu,
   SidebarMenuButton,
@@ -42,8 +39,6 @@ interface GeneratedState {
   preview: CadPreview;
 }
 
-type SidebarPanel = "mold" | "view";
-
 function ToolButton({ label, active = false, children, ...props }: ToolButtonProps) {
   return (
     <SidebarMenuItem>
@@ -66,38 +61,6 @@ function ToolButton({ label, active = false, children, ...props }: ToolButtonPro
   );
 }
 
-function EmptyWorkspacePanel({ onImport, onOpenProject }: { onImport(): void; onOpenProject(): void }) {
-  return (
-    <>
-      <SidebarHeader className="workspace-sidebar-header">
-        <div className="workspace-sidebar-title">Workspace</div>
-        <div className="workspace-sidebar-description">Create a mold from a STEP model.</div>
-      </SidebarHeader>
-      <SidebarContent className="workspace-sidebar-content">
-        <SidebarGroup>
-          <SidebarGroupLabel>Open</SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              <SidebarMenuItem>
-                <SidebarMenuButton onClick={onImport}>
-                  <Upload />
-                  <span>Load STEP model</span>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton onClick={onOpenProject}>
-                  <FolderOpen />
-                  <span>Open project</span>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
-      </SidebarContent>
-    </>
-  );
-}
-
 export function App() {
   const fileName = useAppStore((state) => state.fileName);
   const source = useAppStore((state) => state.source);
@@ -110,7 +73,7 @@ export function App() {
   const finishBuild = useAppStore((state) => state.finishBuild);
 
   const [version, setVersion] = useState("");
-  const [sidebarPanel, setSidebarPanel] = useState<SidebarPanel | null>("mold");
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [view, setView] = useState<ViewState>(DEFAULT_VIEW);
   const [selection, setSelection] = useState<BodySelection | null>(null);
   const [generated, setGenerated] = useState<GeneratedState | null>(null);
@@ -128,10 +91,17 @@ export function App() {
   // yet; it gets a spinner instead of an empty envelope outline.
   const plan = useMemo(() => (mold && preview && !ready ? moldWireframe(mold) : null), [mold, preview, ready]);
   const busy = status.endsWith("…");
+  const building = status === BUILDING;
 
   useEffect(() => {
     void window.moldMaker.getAppInfo().then((info) => setVersion(info.version));
   }, []);
+
+  useEffect(() => {
+    if (!part) return;
+    const timer = window.setTimeout(() => setSidebarOpen(true), 0);
+    return () => window.clearTimeout(timer);
+  }, [part]);
 
   useEffect(() => {
     if (!part || !mold || !encodedSource) return;
@@ -237,16 +207,12 @@ export function App() {
     }
   }
 
-  function toggleSidebar(panel: SidebarPanel): void {
-    setSidebarPanel((current) => (current === panel ? null : panel));
-  }
-
   return (
     <SidebarProvider
-      className="h-full min-h-0"
-      open={sidebarPanel !== null}
-      onOpenChange={(open) => setSidebarPanel((current) => (open ? (current ?? "mold") : null))}
-      style={{ "--sidebar-width": "14.5rem", "--sidebar-width-icon": "3rem" } as React.CSSProperties}
+      className="app-shell h-full min-h-0"
+      open={sidebarOpen}
+      onOpenChange={setSidebarOpen}
+      style={{ "--sidebar-width": "34rem", "--sidebar-width-icon": "3rem" } as React.CSSProperties}
     >
       {/* The narrow rail is the persistent primary navigation; the wider
           sidebar beside it changes context between mold and view controls. */}
@@ -259,20 +225,12 @@ export function App() {
             <SidebarGroupContent>
               <SidebarMenu>
                 <ToolButton
-                  label="Mold settings"
-                  active={sidebarPanel === "mold"}
+                  label="Settings"
+                  active={sidebarOpen}
                   disabled={!part}
-                  onClick={() => toggleSidebar("mold")}
+                  onClick={() => setSidebarOpen((open) => !open)}
                 >
-                  <SlidersHorizontal />
-                </ToolButton>
-                <ToolButton
-                  label="View settings"
-                  active={sidebarPanel === "view"}
-                  disabled={!part}
-                  onClick={() => toggleSidebar("view")}
-                >
-                  <ScanLine />
+                  <Settings2 />
                 </ToolButton>
               </SidebarMenu>
             </SidebarGroupContent>
@@ -285,30 +243,26 @@ export function App() {
       <Sidebar
         collapsible="offcanvas"
         className="app-secondary-sidebar"
-        aria-hidden={sidebarPanel === null}
+        aria-hidden={!sidebarOpen}
         role="complementary"
-        aria-label={part ? (sidebarPanel === "view" ? "View settings" : "Mold settings") : "Workspace"}
+        aria-label="Settings"
       >
-        {part ? (
-          <Inspector
-            section={sidebarPanel ?? "mold"}
-            params={params}
-            mold={mold}
-            view={view}
-            onChange={setParams}
-            onViewChange={(patch) => setView((current) => ({ ...current, ...patch }))}
-            onToggleObject={toggleObject}
-          />
-        ) : (
-          <EmptyWorkspacePanel onImport={importStep} onOpenProject={openProject} />
-        )}
+        <Inspector
+          section="all"
+          params={params}
+          mold={mold}
+          view={view}
+          onChange={setParams}
+          onViewChange={(patch) => setView((current) => ({ ...current, ...patch }))}
+          onToggleObject={toggleObject}
+        />
       </Sidebar>
 
       <SidebarInset className="min-h-0 min-w-0">
         <header className="command-bar">
           <div className="file-name">{fileName ?? "Untitled"}</div>
           <div className="command-actions">
-            {busy && (
+            {busy && !building && (
               <span className="command-status" role="status" aria-live="polite" title={status}>
                 {status}
               </span>
@@ -355,6 +309,12 @@ export function App() {
                 </Button>
               </div>
             </section>
+          )}
+
+          {building && (
+            <div className="build-loading" role="status" aria-label="Building mold" aria-live="polite">
+              <LoaderCircle className="size-8 animate-spin text-muted-foreground" aria-hidden="true" />
+            </div>
           )}
 
         </section>

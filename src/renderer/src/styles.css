@@ -97,6 +97,8 @@ body {
   background: var(--background);
   color: var(--foreground);
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 16px;
+  line-height: 1.5;
   -webkit-font-smoothing: antialiased;
 }
 
@@ -163,7 +165,7 @@ input[type="number"]::-webkit-outer-spin-button { margin: 0; appearance: none; }
 .app-rail-version {
   padding: 0 0 12px;
   color: var(--sidebar-foreground);
-  font-size: 9px;
+  font-size: 11px;
   text-align: center;
   opacity: 0.42;
 }
@@ -175,6 +177,25 @@ input[type="number"]::-webkit-outer-spin-button { margin: 0; appearance: none; }
   left: 48px;
   border-right: 0;
   border-left: 1px solid var(--sidebar-border);
+}
+
+/* The shared primitive keeps the desktop panel fixed so it can slide without
+   disturbing the rail. Give its flex wrapper an explicit slot as well, or the
+   fixed panel would sit on top of a full-width viewport. */
+@media (min-width: 768px) {
+  .app-shell > .peer[data-state="expanded"] {
+    flex: 0 0 var(--sidebar-width);
+  }
+
+  .app-shell > .peer[data-state="collapsed"] {
+    flex: 0 0 0;
+    width: 0;
+  }
+}
+
+.group[data-sidebar="offcanvas"] .app-secondary-sidebar,
+.group[data-collapsible="offcanvas"] .app-secondary-sidebar {
+  width: var(--sidebar-width);
 }
 
 .group[data-collapsible="offcanvas"] .app-secondary-sidebar {
@@ -192,7 +213,7 @@ input[type="number"]::-webkit-outer-spin-button { margin: 0; appearance: none; }
 
 .workspace-sidebar-kicker {
   color: var(--sidebar-foreground);
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.08em;
   opacity: 0.56;
@@ -200,34 +221,77 @@ input[type="number"]::-webkit-outer-spin-button { margin: 0; appearance: none; }
 
 .workspace-sidebar-title {
   color: var(--sidebar-foreground);
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 600;
 }
 
 .workspace-sidebar-description {
   color: var(--sidebar-foreground);
-  font-size: 11px;
-  line-height: 1.35;
+  font-size: 13px;
+  line-height: 1.4;
   opacity: 0.52;
 }
 
 .workspace-sidebar-content > [data-sidebar="group"] {
+  animation: none;
+}
+
+.workspace-sidebar-content {
+  display: grid;
+  grid-template-columns: minmax(0, 1.45fr) minmax(176px, 0.9fr);
+  align-items: start;
+  overflow: auto;
+  padding: 0;
+}
+
+.workspace-sidebar-column {
+  min-width: 0;
+  padding-bottom: 18px;
+}
+
+.workspace-sidebar-mold-column {
+  border-right: 1px solid var(--sidebar-border);
+}
+
+.workspace-sidebar-view-column {
+  min-height: 100%;
+  background: color-mix(in oklch, var(--sidebar) 88%, var(--sidebar-accent));
+}
+
+.workspace-sidebar-column-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 38px;
+  padding: 15px 14px 9px;
+  color: var(--sidebar-foreground);
+  font-size: 13px;
+  font-weight: 650;
+  letter-spacing: 0.03em;
+}
+
+.workspace-sidebar-column-heading > span:last-child {
+  color: var(--sidebar-foreground);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0;
+  opacity: 0.48;
+}
+
+.workspace-sidebar-column > [data-sidebar="group"] {
   animation: moldmaker-fade-up 360ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
-.workspace-sidebar-content > [data-sidebar="group"]:nth-child(2) {
+.workspace-sidebar-column > [data-sidebar="group"]:nth-of-type(2) {
   animation-delay: 55ms;
 }
 
-.workspace-sidebar-content > [data-sidebar="group"]:nth-child(3) {
-  animation-delay: 55ms;
-}
-
-.workspace-sidebar-content > [data-sidebar="group"]:nth-child(5) {
+.workspace-sidebar-column > [data-sidebar="group"]:nth-of-type(3) {
   animation-delay: 110ms;
 }
 
-.workspace-sidebar-content > [data-sidebar="group"]:nth-child(7) {
+.workspace-sidebar-column > [data-sidebar="group"]:nth-of-type(4) {
   animation-delay: 165ms;
 }
 
@@ -256,7 +320,7 @@ input[type="number"]::-webkit-outer-spin-button { margin: 0; appearance: none; }
   position: absolute;
   left: 50%;
   color: var(--muted-foreground);
-  font-size: 12px;
+  font-size: 14px;
   transform: translateX(-50%);
 }
 
@@ -268,7 +332,7 @@ input[type="number"]::-webkit-outer-spin-button { margin: 0; appearance: none; }
 .command-status {
   margin-right: 4px;
   color: var(--muted-foreground);
-  font-size: 11px;
+  font-size: 13px;
   white-space: nowrap;
 }
 
@@ -318,6 +382,14 @@ input[type="number"]::-webkit-outer-spin-button { margin: 0; appearance: none; }
 .empty-state button { pointer-events: auto; }
 .empty-actions { display: flex; gap: 8px; animation: moldmaker-fade-up 420ms 220ms cubic-bezier(0.22, 1, 0.36, 1) both; }
 
+.build-loading {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+}
+
 .body-menu {
   position: absolute;
   z-index: 6;
@@ -348,7 +420,7 @@ input[type="number"]::-webkit-outer-spin-button { margin: 0; appearance: none; }
   position: absolute;
   z-index: 5;
   color: var(--muted-foreground);
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .app-meta { right: 13px; bottom: 10px; }

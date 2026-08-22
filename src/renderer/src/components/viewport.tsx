@@ -29,6 +29,8 @@ interface ViewportProps {
 const EXPLODE_TRAVEL = 0.45;
 /** Pointer travel below which a press counts as a click rather than an orbit. */
 const CLICK_SLOP = 4;
+/** Vertical side section: a YZ plane advancing through the assembly along X. */
+const SECTION_NORMAL = new THREE.Vector3(-1, 0, 0);
 
 const STYLES: Record<SceneObjectId, { colour: number; edge: number; metalness: number; roughness: number }> = {
   // Matte black cast part. The edge overlay matches the body so no wireframe
@@ -76,6 +78,7 @@ const applyExplode = (group: THREE.Group, travel: number, explode: number): void
 export function Viewport({ preview, plan, view, onSelect }: ViewportProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
+  const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const modelRef = useRef<THREE.Group | null>(null);
   const planRef = useRef<THREE.LineSegments | null>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
@@ -84,6 +87,7 @@ export function Viewport({ preview, plan, view, onSelect }: ViewportProps) {
   const fitRef = useRef<() => void>(() => undefined);
   const invalidateRef = useRef<() => void>(() => undefined);
   const explodeTravelRef = useRef(0);
+  const sectionPlaneRef = useRef(new THREE.Plane(SECTION_NORMAL, 0));
   const pendingFitRef = useRef(false);
   const pressRef = useRef<[number, number] | null>(null);
 
@@ -106,6 +110,7 @@ export function Viewport({ preview, plan, view, onSelect }: ViewportProps) {
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.15;
+    rendererRef.current = renderer;
 
     const controls = new OrbitControls(camera, canvas);
     controls.enableDamping = true;
@@ -168,6 +173,10 @@ export function Viewport({ preview, plan, view, onSelect }: ViewportProps) {
       renderer.setSize(width, height, false);
       camera.aspect = width / height;
       camera.updateProjectionMatrix();
+      // The sidebar changes the flex width of this canvas. Re-frame against
+      // the new aspect ratio so the model is centered in the remaining view,
+      // including during the sidebar's width transition.
+      fitRef.current();
       invalidate();
     };
     const resize = new ResizeObserver(resizeCanvas);
@@ -190,6 +199,7 @@ export function Viewport({ preview, plan, view, onSelect }: ViewportProps) {
       frameRef.current = () => undefined;
       sceneRef.current = null;
       cameraRef.current = null;
+      rendererRef.current = null;
       controlsRef.current = null;
       modelRef.current = null;
       planRef.current = null;
@@ -294,7 +304,31 @@ export function Viewport({ preview, plan, view, onSelect }: ViewportProps) {
   // objects avoids reallocating and re-uploading every mesh buffer.
   useEffect(() => {
     const group = modelRef.current;
-    if (!group || !preview) return;
+    const renderer = rendererRef.current;
+    if (!renderer) return;
+    if (!group || !preview) {
+      renderer.clippingPlanes = [];
+      return;
+    }
+
+    applyExplode(group, explodeTravelRef.current, view.explode);
+    group.updateMatrixWorld(true);
+
+    if (view.section) {
+      const bounds = new THREE.Box3().setFromObject(group);
+      const cut = THREE.MathUtils.lerp(
+        bounds.min.x,
+        bounds.max.x,
+        THREE.MathUtils.clamp(view.sectionPosition, 0, 1)
+      );
+      // Three's plane constant is the signed distance from the origin. With
+      // this normal, the positive-X side is clipped, leaving a vertical side
+      // section as the slider advances through the assembly.
+      sectionPlaneRef.current.set(SECTION_NORMAL, cut);
+      renderer.clippingPlanes = [sectionPlaneRef.current];
+    } else {
+      renderer.clippingPlanes = [];
+    }
 
     for (const id of OBJECT_ORDER) {
       const solid = group.getObjectByName(id) as THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial> | undefined;
@@ -320,7 +354,6 @@ export function Viewport({ preview, plan, view, onSelect }: ViewportProps) {
       }
     }
 
-    applyExplode(group, explodeTravelRef.current, view.explode);
     if (pendingFitRef.current) {
       pendingFitRef.current = false;
       fitRef.current();

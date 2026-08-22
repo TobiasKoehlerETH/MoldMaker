@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Eye, EyeOff } from "lucide-react";
+import { Eye, EyeOff, Scissors } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -12,11 +12,12 @@ import {
   SidebarSeparator
 } from "@/components/ui/sidebar";
 import { Slider } from "@/components/ui/slider";
+import { Toggle } from "@/components/ui/toggle";
 import { OBJECT_LABELS, OBJECT_ORDER, type SceneObjectId, type ViewState } from "@/viewport/modes";
 import { MAX_PADDING, type Mold, type MoldParams } from "../../../shared/mold";
 
 interface InspectorProps {
-  section: "mold" | "view";
+  section: "all";
   params: MoldParams;
   mold: Mold | null;
   view: ViewState;
@@ -91,7 +92,7 @@ function NumberField({ id, label, name = label, value, step, min, max, unit, onC
 
   return (
     <div className="flex items-center justify-between gap-3">
-      <Label htmlFor={`setting-${id}`} className="text-xs text-sidebar-foreground/75">
+      <Label htmlFor={`setting-${id}`} className="text-sm text-sidebar-foreground/75">
         {label}
       </Label>
       <div className="flex items-center gap-1.5">
@@ -100,7 +101,7 @@ function NumberField({ id, label, name = label, value, step, min, max, unit, onC
           aria-label={name}
           type="number"
           inputMode="decimal"
-          className="h-7 w-20 appearance-none px-2 text-right text-xs tabular-nums [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+          className="h-8 w-20 appearance-none px-2 text-right text-sm tabular-nums [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
           value={text}
           step={step}
           min={min}
@@ -111,7 +112,7 @@ function NumberField({ id, label, name = label, value, step, min, max, unit, onC
             if (event.key === "Enter") event.currentTarget.blur();
           }}
         />
-        <span className="w-5 text-[10px] text-sidebar-foreground/55">{unit}</span>
+        <span className="w-5 text-xs text-sidebar-foreground/55">{unit}</span>
       </div>
     </div>
   );
@@ -121,7 +122,6 @@ function MoldPanel({ params, mold, onChange }: Pick<InspectorProps, "params" | "
   return (
     <>
       <SidebarGroup>
-        <SidebarGroupLabel>RTV tool</SidebarGroupLabel>
         <SidebarGroupContent className="space-y-2 px-2 pb-2">
           {FIELDS.map(({ key, label, step, min, max, unit }) => (
             <NumberField
@@ -167,7 +167,7 @@ function MoldPanel({ params, mold, onChange }: Pick<InspectorProps, "params" | "
               />
             ))
           ) : (
-            <p className="text-xs text-sidebar-foreground/55">Import a part to size the block.</p>
+            <p className="text-sm text-sidebar-foreground/55">Import a part to size the block.</p>
           )}
         </SidebarGroupContent>
       </SidebarGroup>
@@ -201,7 +201,7 @@ function MoldPanel({ params, mold, onChange }: Pick<InspectorProps, "params" | "
               ))}
             </>
           ) : (
-            <p className="text-xs text-sidebar-foreground/55">Import a part to move the port.</p>
+            <p className="text-sm text-sidebar-foreground/55">Import a part to move the port.</p>
           )}
         </SidebarGroupContent>
       </SidebarGroup>
@@ -215,7 +215,7 @@ function MoldPanel({ params, mold, onChange }: Pick<InspectorProps, "params" | "
         <SidebarGroupContent className="space-y-3 px-2 pb-2">
           {mold ? (
             <>
-              <div className="flex items-center justify-between gap-3 text-xs">
+              <div className="flex items-center justify-between gap-3 text-sm">
                 <Label className="text-sidebar-foreground/75">
                   {["X", "Y", "Z"][mold.splitAxis]} height
                 </Label>
@@ -233,7 +233,7 @@ function MoldPanel({ params, mold, onChange }: Pick<InspectorProps, "params" | "
               />
             </>
           ) : (
-            <p className="text-xs text-sidebar-foreground/55">Import a part to move the seam.</p>
+            <p className="text-sm text-sidebar-foreground/55">Import a part to move the seam.</p>
           )}
         </SidebarGroupContent>
       </SidebarGroup>
@@ -244,6 +244,10 @@ function MoldPanel({ params, mold, onChange }: Pick<InspectorProps, "params" | "
 function ViewPanel({ view, onViewChange, onToggleObject }: Pick<InspectorProps, "view" | "onViewChange" | "onToggleObject">) {
   return (
     <>
+      <div className="workspace-sidebar-column-heading">
+        <span>Viewport</span>
+      </div>
+
       <SidebarGroup>
         <SidebarGroupLabel>Objects</SidebarGroupLabel>
         <SidebarGroupContent className="space-y-1 px-1">
@@ -252,7 +256,7 @@ function ViewPanel({ view, onViewChange, onToggleObject }: Pick<InspectorProps, 
             const shown = visibility !== "hidden";
             const name = OBJECT_LABELS[id].toLowerCase();
             return (
-              <div className="flex h-8 items-center justify-between rounded-md px-2 text-xs" key={id}>
+              <div className="flex h-9 items-center justify-between rounded-md px-2 text-sm" key={id}>
                 <span className={shown ? "text-sidebar-foreground" : "text-sidebar-foreground/40"}>
                   {OBJECT_LABELS[id]}
                 </span>
@@ -278,13 +282,50 @@ function ViewPanel({ view, onViewChange, onToggleObject }: Pick<InspectorProps, 
       <SidebarSeparator />
 
       <SidebarGroup>
-        <SidebarGroupLabel>Assembly</SidebarGroupLabel>
         <SidebarGroupContent className="space-y-3 px-2">
           <div className="flex items-center justify-between">
-            <Label className="text-xs text-sidebar-foreground/70">Explode</Label>
-            <span className="text-xs tabular-nums">{Math.round(view.explode * 100)}%</span>
+            <Label className="text-sm text-sidebar-foreground/70">Explode</Label>
+            <span className="text-sm tabular-nums">{Math.round(view.explode * 100)}%</span>
           </div>
           <Slider aria-label="Explode" value={[view.explode]} min={0} max={1} step={0.02} onValueChange={([value]) => onViewChange({ explode: value })} />
+        </SidebarGroupContent>
+      </SidebarGroup>
+
+      <SidebarSeparator />
+
+      <SidebarGroup>
+        <SidebarGroupContent className="space-y-3 px-2">
+          <div className="flex items-center justify-between">
+            <Label htmlFor="section-view" className="text-sm text-sidebar-foreground/70">Section view</Label>
+            <Toggle
+              id="section-view"
+              aria-label="Section view"
+              aria-pressed={view.section}
+              pressed={view.section}
+              variant="outline"
+              size="sm"
+              title={view.section ? "Hide section" : "Show section"}
+              onPressedChange={(section) => onViewChange({ section })}
+            >
+              <Scissors aria-hidden="true" />
+            </Toggle>
+          </div>
+          {view.section && (
+            <>
+              <div className="flex items-center justify-between">
+                <Label className="text-sm text-sidebar-foreground/70">Cut position</Label>
+                <span className="text-sm tabular-nums">{Math.round(view.sectionPosition * 100)}%</span>
+              </div>
+              <Slider
+                aria-label="Section cut position"
+                value={[view.sectionPosition]}
+                min={0}
+                max={1}
+                step={0.01}
+                onValueChange={([value]) => onViewChange({ sectionPosition: value })}
+              />
+            </>
+          )}
         </SidebarGroupContent>
       </SidebarGroup>
     </>
@@ -292,15 +333,24 @@ function ViewPanel({ view, onViewChange, onToggleObject }: Pick<InspectorProps, 
 }
 
 export function Inspector(props: InspectorProps) {
-  const moldPanel = props.section === "mold";
   return (
     <>
       <SidebarHeader className="workspace-sidebar-header">
-          <div className="grid gap-0.5">
-            <strong className="workspace-sidebar-title">{moldPanel ? "Mold settings" : "View settings"}</strong>
-          </div>
+        <div className="grid gap-0.5">
+          <strong className="workspace-sidebar-title">Settings</strong>
+        </div>
       </SidebarHeader>
-      <SidebarContent key={props.section} className="workspace-sidebar-content">{moldPanel ? <MoldPanel {...props} /> : <ViewPanel {...props} />}</SidebarContent>
+      <SidebarContent className="workspace-sidebar-content">
+        <div className="workspace-sidebar-column workspace-sidebar-mold-column">
+          <div className="workspace-sidebar-column-heading">
+            <span>Mold</span>
+          </div>
+          <MoldPanel {...props} />
+        </div>
+        <div className="workspace-sidebar-column workspace-sidebar-view-column">
+          <ViewPanel {...props} />
+        </div>
+      </SidebarContent>
     </>
   );
 }

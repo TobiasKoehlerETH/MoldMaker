@@ -10,6 +10,45 @@ import {
   type SavedPath
 } from "../shared/electron-api";
 
+interface FileDialogState {
+  lastDirectory?: string;
+}
+
+let lastDirectory: string | undefined;
+let lastDirectoryLoaded = false;
+
+function fileDialogStatePath(): string {
+  return path.join(app.getPath("userData"), "file-dialog-state.json");
+}
+
+async function getLastDirectory(): Promise<string | undefined> {
+  if (lastDirectoryLoaded) return lastDirectory;
+
+  lastDirectoryLoaded = true;
+  try {
+    const state = JSON.parse(await fs.readFile(fileDialogStatePath(), "utf8")) as FileDialogState;
+    if (typeof state.lastDirectory !== "string") return undefined;
+
+    const directory = await fs.stat(state.lastDirectory);
+    if (directory.isDirectory()) lastDirectory = state.lastDirectory;
+  } catch {
+    // A missing or stale preference should leave Electron to choose its normal default.
+  }
+
+  return lastDirectory;
+}
+
+async function rememberDirectory(directory: string): Promise<void> {
+  lastDirectory = directory;
+  lastDirectoryLoaded = true;
+
+  try {
+    await fs.writeFile(fileDialogStatePath(), JSON.stringify({ lastDirectory } satisfies FileDialogState), "utf8");
+  } catch {
+    // Remembering a preference must not turn a completed file operation into an error.
+  }
+}
+
 function canceled<T>(): NativeResult<T> {
   return { ok: false, canceled: true };
 }
@@ -30,15 +69,18 @@ async function withNativeErrorHandling<T>(
 
 async function openFile(filters: Electron.FileFilter[]): Promise<NativeResult<OpenedFile>> {
   return withNativeErrorHandling(async () => {
+    const defaultPath = await getLastDirectory();
     const result = await dialog.showOpenDialog({
       properties: ["openFile"],
-      filters
+      filters,
+      defaultPath
     });
 
     if (result.canceled || result.filePaths.length === 0) return canceled();
 
     const filePath = result.filePaths[0];
     const data = await fs.readFile(filePath);
+    await rememberDirectory(path.dirname(filePath));
     return {
       ok: true,
       value: {
@@ -65,14 +107,16 @@ export function registerFileHandlers(): void {
       const suggestedName = request.suggestedName.toLocaleLowerCase("en-US").endsWith(".moldmaker")
         ? request.suggestedName
         : `${request.suggestedName}.moldmaker`;
+      const lastDirectoryPath = await getLastDirectory();
       const result = await dialog.showSaveDialog({
-        defaultPath: suggestedName,
+        defaultPath: lastDirectoryPath ? path.join(lastDirectoryPath, suggestedName) : suggestedName,
         filters: [{ name: "MoldMaker project", extensions: ["moldmaker"] }]
       });
 
       if (result.canceled || !result.filePath) return canceled();
 
       await fs.writeFile(result.filePath, request.data);
+      await rememberDirectory(path.dirname(result.filePath));
       return { ok: true, value: { path: result.filePath } };
     });
   });
@@ -80,7 +124,11 @@ export function registerFileHandlers(): void {
   ipcMain.handle(IPC_CHANNELS.exportFiles, async (_event, input): Promise<NativeResult<SavedPath>> => {
     return withNativeErrorHandling(async () => {
       const request = exportFilesRequestSchema.parse(input);
-      const result = await dialog.showOpenDialog({ properties: ["openDirectory", "createDirectory"] });
+      const defaultPath = await getLastDirectory();
+      const result = await dialog.showOpenDialog({
+        properties: ["openDirectory", "createDirectory"],
+        defaultPath
+      });
 
       if (result.canceled || result.filePaths.length === 0) return canceled();
 
@@ -88,6 +136,7 @@ export function registerFileHandlers(): void {
       await Promise.all(
         request.files.map((file) => fs.writeFile(path.join(exportDirectory, file.name), file.data))
       );
+      await rememberDirectory(exportDirectory);
       return { ok: true, value: { path: exportDirectory } };
     });
   });
