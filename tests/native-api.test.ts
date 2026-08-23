@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { exportFilesRequestSchema, saveProjectRequestSchema } from "../src/shared/electron-api";
+import { exportFilesRequestSchema, saveProjectRequestSchema } from "../src/shared/native-api";
 
 describe("native file contracts", () => {
   it("accepts a project payload", () => {

@@ -1,13 +1,5 @@
 import { z } from "zod";
 
-export const IPC_CHANNELS = {
-  openStep: "files:open-step",
-  openProject: "files:open-project",
-  saveProject: "files:save-project",
-  exportFiles: "files:export",
-  appInfo: "app:info"
-} as const;
-
 const fileNameSchema = z
   .string()
   .trim()
@@ -32,12 +24,7 @@ export const saveProjectRequestSchema = z.object({
 export const exportFilesRequestSchema = z
   .object({
     files: z
-      .array(
-        z.object({
-          name: fileNameSchema,
-          data: binarySchema
-        })
-      )
+      .array(z.object({ name: fileNameSchema, data: binarySchema }))
       .min(1)
       .max(8)
   })
@@ -46,11 +33,7 @@ export const exportFilesRequestSchema = z
     for (const file of files) {
       const key = file.name.toLocaleLowerCase("en-US");
       if (names.has(key)) {
-        context.addIssue({
-          code: "custom",
-          message: `Duplicate export file name: ${file.name}`,
-          path: ["files"]
-        });
+        context.addIssue({ code: "custom", message: `Duplicate export file name: ${file.name}`, path: ["files"] });
       }
       names.add(key);
     }

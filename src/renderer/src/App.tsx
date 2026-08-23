@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { check, type Update } from "@tauri-apps/plugin-updater";
+import { relaunch } from "@tauri-apps/plugin-process";
 import { Download, FolderOpen, LoaderCircle, Save, Settings2, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Inspector } from "@/components/inspector";
@@ -16,10 +18,11 @@ import {
 } from "@/components/ui/sidebar";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { BUILDING, useAppStore } from "@/store/app-store";
+import { moldMaker } from "@/native-api";
 import { DEFAULT_VIEW, type BodySelection, type SceneObjectId, type ViewState } from "@/viewport/modes";
 import { exportMoldFiles, generateMold } from "@/cad";
 import type { CadPreview } from "../../shared/cad";
-import type { NativeResult } from "../../shared/electron-api";
+import type { NativeResult } from "../../shared/native-api";
 import { buildMold, DEFAULT_PARAMS, moldWireframe, type MoldParams } from "../../shared/mold";
 import { baseName, decodeProject, encodeProject } from "../../shared/project";
 import { scalePartModel, readStepModel } from "../../shared/step";
@@ -77,6 +80,8 @@ export function App() {
   const [view, setView] = useState<ViewState>(DEFAULT_VIEW);
   const [selection, setSelection] = useState<BodySelection | null>(null);
   const [generated, setGenerated] = useState<GeneratedState | null>(null);
+  const [update, setUpdate] = useState<Update | null>(null);
+  const [updateBusy, setUpdateBusy] = useState(false);
   const scaledPart = useMemo(() => (part ? scalePartModel(part, params.shrinkageScale) : null), [part, params.shrinkageScale]);
   const mold = useMemo(() => (scaledPart ? buildMold(scaledPart, params) : null), [scaledPart, params]);
   // Encoded once per file: rebuilds pass the same array so the worker keeps
@@ -94,7 +99,21 @@ export function App() {
   const building = status === BUILDING;
 
   useEffect(() => {
-    void window.moldMaker.getAppInfo().then((info) => setVersion(info.version));
+    void moldMaker.getAppInfo().then((info) => setVersion(info.version));
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    void check()
+      .then((available) => {
+        if (active && available) setUpdate(available);
+      })
+      .catch((error: unknown) => {
+        console.warn("Update check failed", error);
+      });
+    return () => {
+      active = false;
+    };
   }, []);
 
   useEffect(() => {
@@ -156,7 +175,7 @@ export function App() {
 
   async function importStep(): Promise<void> {
     setStatus("");
-    await run(window.moldMaker.openStepFile(), (file) => {
+    await run(moldMaker.openStepFile(), (file) => {
       const text = new TextDecoder().decode(file.data);
       const model = readStepModel(text);
       // A different part gets a fresh camera, so the old solids have to go.
@@ -168,7 +187,7 @@ export function App() {
 
   async function openProject(): Promise<void> {
     setStatus("");
-    await run(window.moldMaker.openProjectFile(), (file) => {
+    await run(moldMaker.openProjectFile(), (file) => {
       const project = decodeProject(file.data);
       setGenerated(null);
       openPart(project.sourceName, project.step, readStepModel(project.step), project.params);
@@ -181,7 +200,7 @@ export function App() {
     setStatus("Saving…");
     const data = encodeProject({ version: 1, sourceName: fileName, step: source, params });
     await run(
-      window.moldMaker.saveProjectFile({ suggestedName: `${baseName(fileName)}.moldmaker`, data }),
+      moldMaker.saveProjectFile({ suggestedName: `${baseName(fileName)}.moldmaker`, data }),
       () => "Project saved"
     );
   }
@@ -194,7 +213,7 @@ export function App() {
       const files = await exportMoldFiles();
       const stem = `${baseName(fileName ?? "mold")}-mold`;
       await run(
-        window.moldMaker.exportFiles({
+        moldMaker.exportFiles({
           files: files.map(({ kind, data }) => {
             const [side, extension] = kind.split("-");
             return { name: `${stem}-${side}.${extension}`, data: new Uint8Array(data) };
@@ -204,6 +223,19 @@ export function App() {
       );
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "The export failed");
+    }
+  }
+
+  async function installUpdate(): Promise<void> {
+    if (!update || updateBusy) return;
+    setUpdateBusy(true);
+    setStatus(`Installing v${update.version}…`);
+    try {
+      await update.downloadAndInstall();
+      await relaunch();
+    } catch (error) {
+      setUpdateBusy(false);
+      setStatus(error instanceof Error ? error.message : "The update could not be installed");
     }
   }
 
@@ -232,6 +264,11 @@ export function App() {
                 >
                   <Settings2 />
                 </ToolButton>
+                {update && (
+                  <ToolButton label={`Install update v${update.version}`} disabled={updateBusy} onClick={installUpdate}>
+                    {updateBusy ? <LoaderCircle className="animate-spin" /> : <Download />}
+                  </ToolButton>
+                )}
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>

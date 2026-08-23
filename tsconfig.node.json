@@ -11,12 +11,9 @@
     "types": ["node", "vitest/globals"]
   },
   "include": [
-    "electron.vite.config.ts",
-    "playwright.config.ts",
+    "vite.config.ts",
     "eslint.config.mjs",
     "vitest.config.ts",
-    "src/main/**/*.ts",
-    "src/preload/**/*.ts",
     "src/shared/**/*.ts",
     "tests/**/*.ts"
   ]
