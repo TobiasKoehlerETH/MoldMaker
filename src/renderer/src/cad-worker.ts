@@ -389,15 +389,13 @@ async function generate({ step, params, splitAxis }: GenerateMoldRequest): Promi
   return { part: part.previewMesh, lower: mesh(lower), upper: mesh(upper) };
 }
 
-/** Encodes the current halves into their STEP and STL files. */
+/** Encodes the current halves into their STEP files. */
 async function exportHalves(): Promise<GeneratedFile[]> {
   await ready;
   if (!halves) throw new Error("Build a mold before exporting");
   const exports = [
     ["lower-step", halves.lower.blobSTEP()],
-    ["upper-step", halves.upper.blobSTEP()],
-    ["lower-stl", halves.lower.blobSTL({ binary: true, tolerance: 0.05 })],
-    ["upper-stl", halves.upper.blobSTL({ binary: true, tolerance: 0.05 })]
+    ["upper-step", halves.upper.blobSTEP()]
   ] as const;
   return Promise.all(exports.map(async ([kind, blob]) => ({ kind, data: await blob.arrayBuffer() })));
 }

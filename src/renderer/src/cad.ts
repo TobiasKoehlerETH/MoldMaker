@@ -100,7 +100,7 @@ export function generateMold(step: Uint8Array | null, params: MoldParams, splitA
   return result;
 }
 
-/** Encodes the current halves into their STEP and STL files on demand. */
+/** Encodes the current halves into their STEP files on demand. */
 export function exportMoldFiles(): Promise<GeneratedFile[]> {
   return post({ kind: "export" }, []);
 }

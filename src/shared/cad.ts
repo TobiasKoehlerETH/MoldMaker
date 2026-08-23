@@ -20,7 +20,7 @@ export interface ExportMoldRequest {
 export type CadRequest = GenerateMoldRequest | ExportMoldRequest;
 
 export interface GeneratedFile {
-  kind: "lower-step" | "upper-step" | "lower-stl" | "upper-stl";
+  kind: "lower-step" | "upper-step";
   data: ArrayBuffer;
 }
 

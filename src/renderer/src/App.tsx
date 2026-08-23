@@ -200,7 +200,7 @@ export function App() {
             return { name: `${stem}-${side}.${extension}`, data: new Uint8Array(data) };
           })
         }),
-        () => "Exported STEP and STL halves"
+        () => "Exported STEP halves"
       );
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "The export failed");
