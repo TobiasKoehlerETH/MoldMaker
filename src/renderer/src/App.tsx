@@ -1,8 +1,7 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { check, type Update } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { Download, FolderOpen, LoaderCircle, Save, Settings2, Upload, X } from "lucide-react";
-import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Button } from "@/components/ui/button";
 import { BackgroundRippleEffect } from "@/components/background-ripple-effect";
 import { Inspector } from "@/components/inspector";
@@ -85,9 +84,6 @@ export function App() {
   const [generated, setGenerated] = useState<GeneratedState | null>(null);
   const [update, setUpdate] = useState<Update | null>(null);
   const [updateBusy, setUpdateBusy] = useState(false);
-  const closingRef = useRef(false);
-  const closeStateRef = useRef({ fileName, part });
-  const autoSaveRef = useRef<(() => Promise<boolean>) | null>(null);
   const scaledPart = useMemo(() => (part ? scalePartModel(part, params.shrinkageScale) : null), [part, params.shrinkageScale]);
   const mold = useMemo(() => (scaledPart ? buildMold(scaledPart, params) : null), [scaledPart, params]);
   // Encoded once per file: rebuilds pass the same array so the worker keeps
@@ -122,35 +118,6 @@ export function App() {
       return false;
     }
   }, [fileName, params, part, setStatus, source, view]);
-
-  useEffect(() => {
-    closeStateRef.current = { fileName, part };
-    autoSaveRef.current = autoSaveProject;
-  }, [autoSaveProject, fileName, part]);
-
-  useEffect(() => {
-    if (!("__TAURI_INTERNALS__" in window)) return;
-    const appWindow = getCurrentWindow();
-    let disposed = false;
-    let unlisten: (() => void) | undefined;
-    void appWindow
-      .onCloseRequested(async (event) => {
-        const { fileName: currentFileName, part: currentPart } = closeStateRef.current;
-        if (closingRef.current || !currentFileName || !currentPart) return;
-        event.preventDefault();
-        closingRef.current = true;
-        if (autoSaveRef.current && await autoSaveRef.current()) await appWindow.destroy();
-        else closingRef.current = false;
-      })
-      .then((removeListener) => {
-        if (disposed) void removeListener();
-        else unlisten = removeListener;
-      });
-    return () => {
-      disposed = true;
-      void unlisten?.();
-    };
-  }, []);
 
   useEffect(() => {
     void moldMaker.getAppInfo().then((info) => setVersion(info.version));

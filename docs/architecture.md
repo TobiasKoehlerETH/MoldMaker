@@ -56,8 +56,9 @@ the cavity, adds screw holes and flow channels, and returns display meshes.
 
 Projects embed the STEP source, so reopening a `.moldmaker` file restores the
 part, mold parameters, and viewport settings without the original CAD file.
-Projects are saved automatically before switching projects and when the window
-closes; the first automatic save opens a file dialog to choose the project path.
+Projects are saved automatically before switching projects; the first automatic
+save opens a file dialog to choose the project path. Closing the application uses
+the native window close behavior so it always exits cleanly.
 The Save as project action remains available when a separate copy is needed.
 Rust validates names, writes the requested bytes, and remembers the last
 directory in the Tauri app-data directory. The returned result keeps the
