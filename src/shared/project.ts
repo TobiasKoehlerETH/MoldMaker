@@ -1,12 +1,16 @@
 import { z } from "zod";
 import { moldParamsSchema } from "./mold";
+import { DEFAULT_VIEW, viewStateSchema } from "./view";
 
 /** A `.moldmaker` project embeds its STEP source so it reopens without the original file. */
 export const projectSchema = z.object({
   version: z.literal(1),
   sourceName: z.string().min(1),
   step: z.string().min(1),
-  params: moldParamsSchema
+  params: moldParamsSchema,
+  // View settings were added after the first project format. The default
+  // keeps existing files compatible while new saves preserve the full setup.
+  view: viewStateSchema.default(DEFAULT_VIEW)
 });
 
 export type Project = z.infer<typeof projectSchema>;

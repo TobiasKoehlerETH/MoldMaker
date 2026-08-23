@@ -7,6 +7,7 @@ use tauri_plugin_dialog::{DialogExt, FilePath};
 #[derive(Default)]
 pub struct FileDialogState {
     last_directory: std::sync::Mutex<Option<PathBuf>>,
+    current_project_path: std::sync::Mutex<Option<PathBuf>>,
 }
 
 #[derive(Serialize)]
@@ -201,7 +202,13 @@ fn open_file(
 
 #[tauri::command]
 fn open_step_file(app: AppHandle, state: State<'_, FileDialogState>) -> NativeResult<OpenedFile> {
-    open_file(app, state, "STEP model", &["step", "stp"])
+    let result = open_file(app, state.clone(), "STEP model", &["step", "stp"]);
+    if result_is_success(&result) {
+        if let Ok(mut path) = state.current_project_path.lock() {
+            *path = None;
+        }
+    }
+    result
 }
 
 #[tauri::command]
@@ -209,7 +216,17 @@ fn open_project_file(
     app: AppHandle,
     state: State<'_, FileDialogState>,
 ) -> NativeResult<OpenedFile> {
-    open_file(app, state, "MoldMaker project", &["moldmaker"])
+    let result = open_file(app, state.clone(), "MoldMaker project", &["moldmaker"]);
+    if let NativeResult::Success { ref value, .. } = result {
+        if let Ok(mut path) = state.current_project_path.lock() {
+            *path = Some(PathBuf::from(&value.path));
+        }
+    }
+    result
+}
+
+fn result_is_success<T>(result: &NativeResult<T>) -> bool {
+    matches!(result, NativeResult::Success { .. })
 }
 
 #[derive(serde::Deserialize)]
@@ -217,6 +234,8 @@ struct SaveProjectRequest {
     #[serde(rename = "suggestedName")]
     suggested_name: String,
     data: Vec<u8>,
+    #[serde(default, rename = "saveAs")]
+    save_as: bool,
 }
 
 #[tauri::command]
@@ -237,6 +256,23 @@ fn save_project_file(
     } else {
         format!("{}.moldmaker", request.suggested_name)
     };
+
+    if !request.save_as {
+        if let Some(path) = state
+            .current_project_path
+            .lock()
+            .ok()
+            .and_then(|value| value.clone())
+        {
+            return match fs::write(&path, request.data) {
+                Ok(()) => NativeResult::success(SavedPath {
+                    path: path.to_string_lossy().into_owned(),
+                }),
+                Err(error) => NativeResult::failed(error.to_string()),
+            };
+        }
+    }
+
     let mut builder = app
         .dialog()
         .file()
@@ -255,6 +291,9 @@ fn save_project_file(
         Ok(()) => {
             if let Some(directory) = path.parent() {
                 remember_directory(&app, &state, directory);
+            }
+            if let Ok(mut current_path) = state.current_project_path.lock() {
+                *current_path = Some(path.clone());
             }
             NativeResult::success(SavedPath {
                 path: path.to_string_lossy().into_owned(),

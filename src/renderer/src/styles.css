@@ -31,62 +31,32 @@
 }
 
 :root {
-  color-scheme: light dark;
-  --background: oklch(0.985 0 0);
+  color-scheme: light;
+  --background: #ffffff;
   --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0 / 0.9);
+  --card: #ffffff;
   --card-foreground: oklch(0.145 0 0);
   --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
+  --primary-foreground: #ffffff;
+  --secondary: #ffffff;
   --secondary-foreground: oklch(0.205 0 0);
   --destructive: oklch(0.577 0.245 27.325);
-  --destructive-foreground: oklch(0.985 0 0);
+  --destructive-foreground: #ffffff;
   --input: oklch(0.88 0 0);
-  --muted: oklch(0.955 0 0);
+  --muted: #ffffff;
   --muted-foreground: oklch(0.5 0 0);
   --accent: oklch(0.93 0 0);
   --accent-foreground: oklch(0.205 0 0);
   --border: oklch(0.88 0 0);
   --ring: oklch(0.55 0 0);
-  --sidebar: hsl(0 0% 98%);
+  --sidebar: #ffffff;
   --sidebar-foreground: hsl(240 5.3% 26.1%);
   --sidebar-primary: hsl(240 5.9% 10%);
-  --sidebar-primary-foreground: hsl(0 0% 98%);
+  --sidebar-primary-foreground: #ffffff;
   --sidebar-accent: hsl(240 4.8% 95.9%);
   --sidebar-accent-foreground: hsl(240 5.9% 10%);
   --sidebar-border: hsl(220 13% 91%);
   --sidebar-ring: hsl(217.2 91.2% 59.8%);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: oklch(0.145 0 0);
-    --foreground: oklch(0.985 0 0);
-    --card: oklch(0.19 0 0 / 0.92);
-    --card-foreground: oklch(0.985 0 0);
-    --primary: oklch(0.92 0 0);
-    --primary-foreground: oklch(0.17 0 0);
-    --secondary: oklch(0.269 0 0);
-    --secondary-foreground: oklch(0.985 0 0);
-    --destructive: oklch(0.704 0.191 22.216);
-    --destructive-foreground: oklch(0.985 0 0);
-    --input: oklch(1 0 0 / 0.15);
-    --muted: oklch(0.22 0 0);
-    --muted-foreground: oklch(0.68 0 0);
-    --accent: oklch(0.25 0 0);
-    --accent-foreground: oklch(0.985 0 0);
-    --border: oklch(1 0 0 / 0.12);
-    --ring: oklch(0.65 0 0);
-    --sidebar: hsl(240 5.9% 10%);
-    --sidebar-foreground: hsl(240 4.8% 95.9%);
-    --sidebar-primary: hsl(0 0% 98%);
-    --sidebar-primary-foreground: hsl(240 5.9% 10%);
-    --sidebar-accent: hsl(240 3.7% 15.9%);
-    --sidebar-accent-foreground: hsl(240 4.8% 95.9%);
-    --sidebar-border: hsl(240 3.7% 15.9%);
-    --sidebar-ring: hsl(217.2 91.2% 59.8%);
-  }
 }
 
 * { box-sizing: border-box; }
@@ -129,6 +99,12 @@ button { font: inherit; }
   to { opacity: 0.22; }
 }
 
+@keyframes cell-ripple {
+  0% { opacity: 0.32; background: var(--welcome-ripple-fill); }
+  50% { opacity: 0.78; background: var(--welcome-ripple-fill); }
+  100% { opacity: 0.32; background: transparent; }
+}
+
 input[type="number"] { appearance: textfield; }
 input[type="number"]::-webkit-inner-spin-button,
 input[type="number"]::-webkit-outer-spin-button { margin: 0; appearance: none; }
@@ -140,6 +116,7 @@ input[type="number"]::-webkit-outer-spin-button { margin: 0; appearance: none; }
   flex-direction: column;
   background: var(--sidebar);
   color: var(--sidebar-foreground);
+  border-right: 1px solid var(--sidebar-border);
   animation: moldmaker-fade-in 320ms ease-out both;
 }
 
@@ -157,7 +134,7 @@ input[type="number"]::-webkit-outer-spin-button { margin: 0; appearance: none; }
 }
 
 .app-rail-tool:hover {
-  transform: translateX(2px);
+  transform: scale(1.18);
 }
 
 .app-rail-spacer { flex: 1; }
@@ -170,12 +147,100 @@ input[type="number"]::-webkit-outer-spin-button { margin: 0; appearance: none; }
   opacity: 0.42;
 }
 
+.welcome-screen {
+  position: relative;
+  display: grid;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  isolation: isolate;
+  background: #ffffff;
+}
+
+.welcome-ripple {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: -1;
+  opacity: 0.58;
+  transform: translate(-50%, -50%);
+}
+
+.background-ripple-effect {
+  display: grid;
+  border: 1px solid var(--border);
+  mask-image: radial-gradient(ellipse at center, black 18%, transparent 74%);
+}
+
+.background-ripple-cell {
+  border: 1px solid color-mix(in srgb, var(--border) 68%, transparent);
+  background: transparent;
+  cursor: pointer;
+  transition: background-color 180ms ease-out, border-color 180ms ease-out;
+}
+
+.background-ripple-cell:hover {
+  border-color: color-mix(in srgb, var(--foreground) 22%, transparent);
+  background: color-mix(in srgb, var(--foreground) 4%, transparent);
+}
+
+.background-ripple-cell.is-rippling {
+  --welcome-ripple-fill: color-mix(in srgb, var(--foreground) 16%, transparent);
+  animation: cell-ripple 520ms ease-out var(--ripple-delay) both;
+}
+
+.welcome-content {
+  display: flex;
+  width: min(100% - 32px, 520px);
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  justify-self: center;
+  text-align: center;
+  animation: moldmaker-fade-up 520ms 80ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.welcome-kicker {
+  margin: 0 0 8px;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.welcome-content h1 {
+  margin: 0 0 8px;
+  color: var(--foreground);
+  font-size: clamp(42px, 8vw, 72px);
+  font-weight: 650;
+  letter-spacing: -0.065em;
+  line-height: 0.96;
+}
+
+.welcome-description {
+  max-width: 360px;
+  margin: 18px 0 24px;
+  color: var(--muted-foreground);
+  font-size: 15px;
+  line-height: 1.55;
+}
+
+.welcome-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+}
+
 /* Sidebar's desktop surface is fixed by the shared shadcn primitive. Keep
    that surface beside MoldMaker's persistent icon rail instead of underneath
    it; the collapsed state retreats only across its own column. */
 .app-secondary-sidebar {
   left: 48px;
-  border-right: 0;
+  width: var(--sidebar-width);
+  min-width: var(--sidebar-width);
+  border-right: 1px solid var(--sidebar-border);
   border-left: 1px solid var(--sidebar-border);
 }
 
@@ -255,7 +320,7 @@ input[type="number"]::-webkit-outer-spin-button { margin: 0; appearance: none; }
 
 .workspace-sidebar-view-column {
   min-height: 100%;
-  background: color-mix(in oklch, var(--sidebar) 88%, var(--sidebar-accent));
+  background: #ffffff;
 }
 
 .workspace-sidebar-column-heading {
@@ -311,7 +376,7 @@ input[type="number"]::-webkit-outer-spin-button { margin: 0; appearance: none; }
   flex: 0 0 44px;
   padding: 0 8px;
   border-bottom: 1px solid var(--border);
-  background: color-mix(in oklch, var(--background) 92%, transparent);
+  background: #ffffff;
   user-select: none;
   animation: moldmaker-fade-in 300ms 80ms ease-out both;
 }
@@ -329,6 +394,10 @@ input[type="number"]::-webkit-outer-spin-button { margin: 0; appearance: none; }
   align-items: center;
 }
 
+.command-actions button:hover {
+  transform: scale(1.18);
+}
+
 .command-status {
   margin-right: 4px;
   color: var(--muted-foreground);
@@ -341,13 +410,13 @@ input[type="number"]::-webkit-outer-spin-button { margin: 0; appearance: none; }
   min-height: 0;
   flex: 1;
   overflow: hidden;
-  background: color-mix(in oklch, var(--background) 94%, var(--foreground));
+  background: #ffffff;
 }
 
 .viewport-grid {
   position: absolute;
   inset: 0;
-  opacity: 0.22;
+  opacity: 0.12;
   background-image:
     linear-gradient(var(--border) 1px, transparent 1px),
     linear-gradient(90deg, var(--border) 1px, transparent 1px);
@@ -365,7 +434,23 @@ input[type="number"]::-webkit-outer-spin-button { margin: 0; appearance: none; }
   touch-action: none;
 }
 
+.viewport-canvas.is-hovering { cursor: pointer; }
 .viewport-canvas:active { cursor: grabbing; }
+
+.viewer-close-button {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 2;
+  border: 0;
+  background: transparent;
+  transition: background-color 150ms ease, transform 150ms ease;
+}
+
+.viewer-close-button:hover {
+  background: rgb(0 0 0 / 7%);
+  transform: scale(1.06);
+}
 
 .empty-state {
   position: absolute;
@@ -425,13 +510,3 @@ input[type="number"]::-webkit-outer-spin-button { margin: 0; appearance: none; }
 
 .app-meta { right: 13px; bottom: 10px; }
 
-.dark {
-  --sidebar: hsl(240 5.9% 10%);
-  --sidebar-foreground: hsl(240 4.8% 95.9%);
-  --sidebar-primary: hsl(224.3 76.3% 48%);
-  --sidebar-primary-foreground: hsl(0 0% 100%);
-  --sidebar-accent: hsl(240 3.7% 15.9%);
-  --sidebar-accent-foreground: hsl(240 4.8% 95.9%);
-  --sidebar-border: hsl(240 3.7% 15.9%);
-  --sidebar-ring: hsl(217.2 91.2% 59.8%);
-}

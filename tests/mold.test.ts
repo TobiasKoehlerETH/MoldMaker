@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { buildMold, DEFAULT_PARAMS, flowPorts, moldBounds, moldParamsSchema, partingHeight, splitAxis } from "../src/shared/mold";
 import { decodeProject, encodeProject } from "../src/shared/project";
+import { DEFAULT_VIEW } from "../src/shared/view";
 import { readStepModel } from "../src/shared/step";
 import { boundsOf, planarDistance } from "../src/shared/vec3";
 
@@ -154,9 +155,23 @@ describe("RTV mold plan", () => {
 
 describe("project file", () => {
   it("round-trips the embedded STEP source and mold parameters", () => {
-    const project = { version: 1, sourceName: "sample.STEP", step: sample, params: DEFAULT_PARAMS } as const;
+    const view = {
+      ...DEFAULT_VIEW,
+      objects: { part: "ghost", lower: "hidden", upper: "solid" },
+      explode: 0.36,
+      section: true,
+      sectionPosition: 0.72,
+      standardView: "side"
+    } as const;
+    const project = { version: 1, sourceName: "sample.STEP", step: sample, params: DEFAULT_PARAMS, view } as const;
 
     expect(decodeProject(encodeProject(project))).toEqual(project);
+  });
+
+  it("defaults viewport settings when loading a project from the original format", () => {
+    const legacy = { version: 1, sourceName: "sample.STEP", step: sample, params: DEFAULT_PARAMS };
+
+    expect(decodeProject(new TextEncoder().encode(JSON.stringify(legacy))).view).toEqual(DEFAULT_VIEW);
   });
 
   it("rejects a project with invalid parameters", () => {

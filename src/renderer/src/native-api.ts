@@ -22,10 +22,12 @@ export const moldMaker: MoldMakerApi = {
   openStepFile: () => invoke<NativeResult<OpenedFile>>("open_step_file").then(normalizeOpenedFile),
   openProjectFile: () => invoke<NativeResult<OpenedFile>>("open_project_file").then(normalizeOpenedFile),
   saveProjectFile: (request: SaveProjectRequest) =>
-    invoke<NativeResult<SavedPath>>("save_project_file", { ...request, data: bytes(request.data) }),
+    invoke<NativeResult<SavedPath>>("save_project_file", {
+      request: { ...request, data: bytes(request.data) }
+    }),
   exportFiles: (request: ExportFilesRequest) =>
     invoke<NativeResult<SavedPath>>("export_files", {
-      files: request.files.map((file) => ({ ...file, data: bytes(file.data) }))
+      request: { files: request.files.map((file) => ({ ...file, data: bytes(file.data) })) }
     }),
   getAppInfo: () => invoke<AppInfo>("app_info")
 };

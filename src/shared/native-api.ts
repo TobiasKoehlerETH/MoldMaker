@@ -18,7 +18,8 @@ const binarySchema = z.custom<Uint8Array>((value) => value instanceof Uint8Array
 
 export const saveProjectRequestSchema = z.object({
   suggestedName: fileNameSchema,
-  data: binarySchema
+  data: binarySchema,
+  saveAs: z.boolean().optional()
 });
 
 export const exportFilesRequestSchema = z

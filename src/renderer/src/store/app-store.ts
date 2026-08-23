@@ -13,6 +13,7 @@ interface AppState {
   params: MoldParams;
   status: string;
   openPart(fileName: string, source: string, part: PartModel, params: MoldParams): void;
+  closePart(): void;
   setParams(patch: Partial<MoldParams>): void;
   setStatus(status: string): void;
   finishBuild(status: string): void;
@@ -25,6 +26,7 @@ export const useAppStore = create<AppState>((set) => ({
   params: DEFAULT_PARAMS,
   status: "Ready",
   openPart: (fileName, source, part, params) => set({ fileName, source, part, params }),
+  closePart: () => set({ fileName: null, source: "", part: null, params: DEFAULT_PARAMS, status: "Ready" }),
   setParams: (patch) => set((state) => ({ params: { ...state.params, ...patch }, status: BUILDING })),
   setStatus: (status) => set({ status }),
   // A build finishing must not overwrite a message a newer user action put up.

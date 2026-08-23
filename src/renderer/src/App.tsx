@@ -1,8 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { check, type Update } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
-import { Download, FolderOpen, LoaderCircle, Save, Settings2, Upload } from "lucide-react";
+import { Download, FolderOpen, LoaderCircle, Save, Settings2, Upload, X } from "lucide-react";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Button } from "@/components/ui/button";
+import { BackgroundRippleEffect } from "@/components/background-ripple-effect";
 import { Inspector } from "@/components/inspector";
 import { VisibilityMenu } from "@/components/visibility-menu";
 import { Viewport } from "@/components/viewport";
@@ -71,6 +73,7 @@ export function App() {
   const params = useAppStore((state) => state.params);
   const status = useAppStore((state) => state.status);
   const openPart = useAppStore((state) => state.openPart);
+  const closePart = useAppStore((state) => state.closePart);
   const setParams = useAppStore((state) => state.setParams);
   const setStatus = useAppStore((state) => state.setStatus);
   const finishBuild = useAppStore((state) => state.finishBuild);
@@ -82,6 +85,9 @@ export function App() {
   const [generated, setGenerated] = useState<GeneratedState | null>(null);
   const [update, setUpdate] = useState<Update | null>(null);
   const [updateBusy, setUpdateBusy] = useState(false);
+  const closingRef = useRef(false);
+  const closeStateRef = useRef({ fileName, part });
+  const autoSaveRef = useRef<(() => Promise<boolean>) | null>(null);
   const scaledPart = useMemo(() => (part ? scalePartModel(part, params.shrinkageScale) : null), [part, params.shrinkageScale]);
   const mold = useMemo(() => (scaledPart ? buildMold(scaledPart, params) : null), [scaledPart, params]);
   // Encoded once per file: rebuilds pass the same array so the worker keeps
@@ -97,6 +103,54 @@ export function App() {
   const plan = useMemo(() => (mold && preview && !ready ? moldWireframe(mold) : null), [mold, preview, ready]);
   const busy = status.endsWith("…");
   const building = status === BUILDING;
+
+  const autoSaveProject = useCallback(async (): Promise<boolean> => {
+    if (!fileName || !part) return true;
+    try {
+      const result = await moldMaker.saveProjectFile({
+        suggestedName: `${baseName(fileName)}.moldmaker`,
+        data: encodeProject({ version: 1, sourceName: fileName, step: source, params, view })
+      });
+      if (result.ok) {
+        setStatus("Project saved");
+        return true;
+      }
+      setStatus(result.canceled ? "Ready" : result.error);
+      return false;
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "The project could not be saved");
+      return false;
+    }
+  }, [fileName, params, part, setStatus, source, view]);
+
+  useEffect(() => {
+    closeStateRef.current = { fileName, part };
+    autoSaveRef.current = autoSaveProject;
+  }, [autoSaveProject, fileName, part]);
+
+  useEffect(() => {
+    if (!("__TAURI_INTERNALS__" in window)) return;
+    const appWindow = getCurrentWindow();
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+    void appWindow
+      .onCloseRequested(async (event) => {
+        const { fileName: currentFileName, part: currentPart } = closeStateRef.current;
+        if (closingRef.current || !currentFileName || !currentPart) return;
+        event.preventDefault();
+        closingRef.current = true;
+        if (autoSaveRef.current && await autoSaveRef.current()) await appWindow.destroy();
+        else closingRef.current = false;
+      })
+      .then((removeListener) => {
+        if (disposed) void removeListener();
+        else unlisten = removeListener;
+      });
+    return () => {
+      disposed = true;
+      void unlisten?.();
+    };
+  }, []);
 
   useEffect(() => {
     void moldMaker.getAppInfo().then((info) => setVersion(info.version));
@@ -150,17 +204,15 @@ export function App() {
     setView((current) => ({ ...current, objects: { ...current.objects, [id]: value } }));
   }, []);
 
-  // The sidebar's eye is the plain show/hide; transparency comes from clicking
-  // the body itself, so hiding a ghosted body and showing it again returns it
-  // solid rather than to a state the eye never offered.
-  const toggleObject = useCallback((id: SceneObjectId): void => {
-    setView((current) => ({
-      ...current,
-      objects: { ...current.objects, [id]: current.objects[id] === "hidden" ? "solid" : "hidden" }
-    }));
-  }, []);
-
   const closeSelection = useCallback(() => setSelection(null), []);
+
+  function closeProject(): void {
+    setGenerated(null);
+    setView(DEFAULT_VIEW);
+    setSelection(null);
+    setSidebarOpen(false);
+    closePart();
+  }
 
   /** Runs a native call and reports its outcome in the status line. */
   async function run<T>(pending: Promise<NativeResult<T>>, onValue: (value: T) => string): Promise<void> {
@@ -174,33 +226,38 @@ export function App() {
   }
 
   async function importStep(): Promise<void> {
+    if (!(await autoSaveProject())) return;
     setStatus("");
     await run(moldMaker.openStepFile(), (file) => {
       const text = new TextDecoder().decode(file.data);
       const model = readStepModel(text);
       // A different part gets a fresh camera, so the old solids have to go.
       setGenerated(null);
+      setView(DEFAULT_VIEW);
+      setSelection(null);
       openPart(file.name, text, model, DEFAULT_PARAMS);
       return `STEP loaded · ${model.edges.length} edges`;
     });
   }
 
   async function openProject(): Promise<void> {
+    if (!(await autoSaveProject())) return;
     setStatus("");
     await run(moldMaker.openProjectFile(), (file) => {
       const project = decodeProject(file.data);
       setGenerated(null);
+      setView(project.view);
+      setSelection(null);
       openPart(project.sourceName, project.step, readStepModel(project.step), project.params);
       return "Project loaded";
     });
   }
 
-  async function saveProject(): Promise<void> {
-    if (!fileName) return;
-    setStatus("Saving…");
-    const data = encodeProject({ version: 1, sourceName: fileName, step: source, params });
+  async function saveAsProject(): Promise<void> {
+    if (!fileName || !part) return;
+    const data = encodeProject({ version: 1, sourceName: fileName, step: source, params, view });
     await run(
-      moldMaker.saveProjectFile({ suggestedName: `${baseName(fileName)}.moldmaker`, data }),
+      moldMaker.saveProjectFile({ suggestedName: `${baseName(fileName)}.moldmaker`, data, saveAs: true }),
       () => "Project saved"
     );
   }
@@ -237,6 +294,25 @@ export function App() {
       setUpdateBusy(false);
       setStatus(error instanceof Error ? error.message : "The update could not be installed");
     }
+  }
+
+  if (!part) {
+    return (
+      <main className="welcome-screen">
+        <BackgroundRippleEffect className="welcome-ripple" />
+        <section className="welcome-content" aria-labelledby="welcome-title">
+          <h1 id="welcome-title">MoldMaker</h1>
+          <div className="welcome-actions">
+            <Button aria-label="Load STEP model" onClick={importStep}>
+              <Upload /> Import STEP
+            </Button>
+            <Button variant="outline" onClick={openProject}>
+              <FolderOpen /> Open project
+            </Button>
+          </div>
+        </section>
+      </main>
+    );
   }
 
   return (
@@ -291,7 +367,10 @@ export function App() {
           view={view}
           onChange={setParams}
           onViewChange={(patch) => setView((current) => ({ ...current, ...patch }))}
-          onToggleObject={toggleObject}
+          onToggleObject={(id) => setView((current) => ({
+            ...current,
+            objects: { ...current.objects, [id]: current.objects[id] === "hidden" ? "solid" : "hidden" }
+          }))}
         />
       </Sidebar>
 
@@ -310,7 +389,7 @@ export function App() {
             <Button variant="ghost" size="icon" aria-label="Open project" title="Open project" onClick={openProject}>
               <FolderOpen />
             </Button>
-            <Button variant="ghost" size="icon" aria-label="Save project" title="Save project" disabled={!part} onClick={saveProject}>
+            <Button variant="ghost" size="icon" aria-label="Save as project" title="Save as project" disabled={!part} onClick={saveAsProject}>
               <Save />
             </Button>
             <Button variant="ghost" size="icon" aria-label="Export mold" title="Export mold" disabled={!ready} onClick={exportMold}>
@@ -321,7 +400,17 @@ export function App() {
 
         <section className="viewport" aria-label="3D workspace">
           <div className="viewport-grid" />
-          <Viewport preview={preview} plan={plan} view={view} onSelect={setSelection} />
+          <Viewport preview={preview} plan={plan} view={view} selectedId={selection?.id ?? null} onSelect={setSelection} />
+          <Button
+            variant="ghost"
+            size="icon"
+            className="viewer-close-button"
+            aria-label="Close project"
+            title="Close project"
+            onClick={closeProject}
+          >
+            <X />
+          </Button>
 
           {selection && (
             <VisibilityMenu
@@ -333,19 +422,6 @@ export function App() {
               }}
               onClose={closeSelection}
             />
-          )}
-
-          {!part && (
-            <section className="empty-state">
-              <div className="empty-actions">
-                <Button aria-label="Load STEP model" onClick={importStep}>
-                  <Upload /> Import STEP
-                </Button>
-                <Button variant="outline" onClick={openProject}>
-                  <FolderOpen /> Open project
-                </Button>
-              </div>
-            </section>
           )}
 
           {building && (

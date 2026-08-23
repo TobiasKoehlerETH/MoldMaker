@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import type { CadMesh, CadPreview } from "../../../shared/cad";
@@ -16,6 +16,7 @@ interface ViewportProps {
   /** Envelope and port lines drawn while the solids catch up with the settings. */
   plan: Vec3[][] | null;
   view: ViewState;
+  selectedId: SceneObjectId | null;
   onSelect(selection: BodySelection | null): void;
 }
 
@@ -29,6 +30,9 @@ interface ViewportProps {
 const EXPLODE_TRAVEL = 0.45;
 /** Pointer travel below which a press counts as a click rather than an orbit. */
 const CLICK_SLOP = 4;
+/** Blue interaction colour used for both hover and the active body. */
+const INTERACTION_COLOUR = 0x38bdf8;
+const INTERACTION_EMISSIVE = 0x0b5f88;
 /** Vertical side section: a YZ plane advancing through the assembly along X. */
 const SECTION_NORMAL = new THREE.Vector3(-1, 0, 0);
 
@@ -243,11 +247,41 @@ const applyExplode = (group: THREE.Group, travel: number, explode: number): void
   group.getObjectByName("upper")?.position.setZ(shift);
 };
 
-export function Viewport({ preview, plan, view, onSelect }: ViewportProps) {
+/** Adds a small CAD-style lift without changing the body's visibility mode. */
+const setBodyHighlighted = (group: THREE.Group, id: SceneObjectId, highlighted: boolean): void => {
+  const solid = group.getObjectByName(id) as THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial> | undefined;
+  if (!solid) return;
+
+  solid.material.emissive.setHex(highlighted ? INTERACTION_EMISSIVE : 0x000000);
+  solid.material.emissiveIntensity = highlighted ? 0.2 : 0;
+
+  const lines = solid.getObjectByName(`${id}-edges`) as
+    | THREE.LineSegments<THREE.BufferGeometry, THREE.LineBasicMaterial>
+    | undefined;
+  if (lines) {
+    lines.material.color.setHex(highlighted ? INTERACTION_COLOUR : STYLES[id].edge);
+    lines.material.needsUpdate = true;
+  }
+
+  const cap = solid.getObjectByName(`${id}-section-cap`) as
+    | THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial>
+    | undefined;
+  if (cap) {
+    cap.material.emissive.setHex(highlighted ? INTERACTION_EMISSIVE : 0x000000);
+    cap.material.emissiveIntensity = highlighted ? 0.2 : 0;
+  }
+};
+
+const syncBodyHighlights = (group: THREE.Group, hoveredId: SceneObjectId | null, selectedId: SceneObjectId | null): void => {
+  for (const id of OBJECT_ORDER) setBodyHighlighted(group, id, id === hoveredId || id === selectedId);
+};
+
+export function Viewport({ preview, plan, view, selectedId, onSelect }: ViewportProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const modelRef = useRef<THREE.Group | null>(null);
+  const hoveredRef = useRef<SceneObjectId | null>(null);
   const planRef = useRef<THREE.LineSegments | null>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const controlsRef = useRef<OrbitControls | null>(null);
@@ -258,6 +292,7 @@ export function Viewport({ preview, plan, view, onSelect }: ViewportProps) {
   const sectionPlaneRef = useRef(new THREE.Plane(SECTION_NORMAL, 0));
   const pendingFitRef = useRef(false);
   const pressRef = useRef<[number, number] | null>(null);
+  const [hoveredId, setHoveredId] = useState<SceneObjectId | null>(null);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -320,9 +355,8 @@ export function Viewport({ preview, plan, view, onSelect }: ViewportProps) {
       const horizontal = Math.atan(Math.tan(vertical) * camera.aspect);
       const distance = (radius / Math.sin(Math.min(vertical, horizontal))) * 1.05;
       controls.target.copy(center);
-      camera.position
-        .copy(center)
-        .add(new THREE.Vector3(1.25, -1.45, 1.05).normalize().multiplyScalar(distance));
+      camera.up.set(0, 0, 1);
+      camera.position.copy(center).add(new THREE.Vector3(1.25, -1.45, 1.05).normalize().multiplyScalar(distance));
       camera.near = Math.max(radius / 500, 0.01);
       camera.far = Math.max(radius * 50, 1000);
       camera.updateProjectionMatrix();
@@ -347,6 +381,7 @@ export function Viewport({ preview, plan, view, onSelect }: ViewportProps) {
       fitRef.current();
       invalidate();
     };
+
     const resize = new ResizeObserver(resizeCanvas);
     resize.observe(canvas);
     resizeCanvas();
@@ -388,6 +423,8 @@ export function Viewport({ preview, plan, view, onSelect }: ViewportProps) {
       dispose(modelRef.current);
       modelRef.current = null;
     }
+    hoveredRef.current = null;
+    setHoveredId(null);
     explodeTravelRef.current = 0;
     fitRef.current = () => undefined;
     if (!preview) {
@@ -541,6 +578,8 @@ export function Viewport({ preview, plan, view, onSelect }: ViewportProps) {
         lines.material.depthTest = !transparent;
       }
 
+      setBodyHighlighted(group, id, id === hoveredRef.current || id === selectedId);
+
       const cap = solid.getObjectByName(`${id}-section-cap`) as
         | THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial>
         | undefined;
@@ -564,7 +603,63 @@ export function Viewport({ preview, plan, view, onSelect }: ViewportProps) {
       fitRef.current();
     }
     invalidateRef.current();
-  }, [preview, view]);
+  }, [preview, selectedId, view]);
+
+  useEffect(() => {
+    const group = modelRef.current;
+    if (group && view.standardView) {
+      // Standard views are an explicit camera command; do not alter model or
+      // presentation state while changing orientation.
+      const camera = cameraRef.current;
+      const controls = controlsRef.current;
+      if (camera && controls) {
+        const box = new THREE.Box3().setFromObject(group);
+        if (!box.isEmpty()) {
+          const center = box.getCenter(new THREE.Vector3());
+          const radius = box.getSize(new THREE.Vector3()).length() / 2;
+          const vertical = THREE.MathUtils.degToRad(camera.fov) / 2;
+          const horizontal = Math.atan(Math.tan(vertical) * camera.aspect);
+          const distance = (radius / Math.sin(Math.min(vertical, horizontal))) * 1.05;
+          const direction = view.standardView === "front" ? new THREE.Vector3(0, -1, 0) : view.standardView === "side" ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 0, 1);
+          camera.up.set(0, 0, 1);
+          if (view.standardView === "top") camera.up.set(0, 1, 0);
+          controls.target.copy(center);
+          camera.position.copy(center).add(direction.multiplyScalar(distance));
+          controls.update();
+          invalidateRef.current();
+        }
+      }
+    }
+  }, [preview, view.standardView]);
+
+  /** Finds the front-most visible mold body under the pointer. */
+  function bodyAtPointer(event: React.PointerEvent<HTMLCanvasElement>): SceneObjectId | null {
+    const canvas = canvasRef.current;
+    const camera = cameraRef.current;
+    const group = modelRef.current;
+    if (!canvas || !camera || !group) return null;
+
+    const rect = canvas.getBoundingClientRect();
+    const pointer = new THREE.Vector2(
+      ((event.clientX - rect.left) / rect.width) * 2 - 1,
+      -((event.clientY - rect.top) / rect.height) * 2 + 1
+    );
+    const raycaster = new THREE.Raycaster();
+    raycaster.setFromCamera(pointer, camera);
+    const visibleBodies = group.children.filter((child) => child.visible);
+    const hit = raycaster.intersectObjects(visibleBodies, false)[0];
+    return (hit?.object.userData.id as SceneObjectId | undefined) ?? null;
+  }
+
+  function updateHover(event: React.PointerEvent<HTMLCanvasElement>): void {
+    const nextId = bodyAtPointer(event);
+    if (nextId === hoveredRef.current) return;
+    hoveredRef.current = nextId;
+    setHoveredId(nextId);
+    const group = modelRef.current;
+    if (group) syncBodyHighlights(group, nextId, selectedId);
+    invalidateRef.current();
+  }
 
   /** Picks the front-most mold body under the pointer, ignoring orbit drags. */
   function selectAtPointer(event: React.PointerEvent<HTMLCanvasElement>): void {
@@ -577,24 +672,24 @@ export function Viewport({ preview, plan, view, onSelect }: ViewportProps) {
     if (Math.hypot(event.clientX - press[0], event.clientY - press[1]) > CLICK_SLOP) return;
 
     const rect = canvas.getBoundingClientRect();
-    const pointer = new THREE.Vector2(
-      ((event.clientX - rect.left) / rect.width) * 2 - 1,
-      -((event.clientY - rect.top) / rect.height) * 2 + 1
-    );
-    const raycaster = new THREE.Raycaster();
-    raycaster.setFromCamera(pointer, camera);
-    const visibleBodies = group.children.filter((child) => child.visible);
-    const hit = raycaster.intersectObjects(visibleBodies, false)[0];
-    const id = hit?.object.userData.id as SceneObjectId | undefined;
+    const id = bodyAtPointer(event);
     onSelect(id ? { id, x: event.clientX - rect.left, y: event.clientY - rect.top } : null);
   }
 
   return (
     <canvas
       ref={canvasRef}
-      className="viewport-canvas"
+      className={hoveredId ? "viewport-canvas is-hovering" : "viewport-canvas"}
       aria-label="3D model viewport"
       onDoubleClick={() => fitRef.current()}
+      onPointerMove={updateHover}
+      onPointerLeave={() => {
+        hoveredRef.current = null;
+        setHoveredId(null);
+        const group = modelRef.current;
+        if (group) syncBodyHighlights(group, null, selectedId);
+        invalidateRef.current();
+      }}
       onPointerDown={(event) => {
         pressRef.current = [event.clientX, event.clientY];
       }}

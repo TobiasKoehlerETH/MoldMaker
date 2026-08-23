@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Eye, EyeOff } from "lucide-react";
+import { Box, Eye, EyeOff, RectangleHorizontal, RectangleVertical } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -12,7 +12,7 @@ import {
   SidebarSeparator
 } from "@/components/ui/sidebar";
 import { Slider } from "@/components/ui/slider";
-import { OBJECT_LABELS, OBJECT_ORDER, type SceneObjectId, type ViewState } from "@/viewport/modes";
+import { OBJECT_LABELS, OBJECT_ORDER, type SceneObjectId, type StandardView, type ViewState } from "@/viewport/modes";
 import { MAX_END_CLEARANCE, MAX_PADDING, type Mold, type MoldParams } from "../../../shared/mold";
 
 interface InspectorProps {
@@ -243,11 +243,39 @@ function MoldPanel({ params, mold, onChange }: Pick<InspectorProps, "params" | "
 }
 
 function ViewPanel({ view, onViewChange, onToggleObject }: Pick<InspectorProps, "view" | "onViewChange" | "onToggleObject">) {
+  const standardViews: { id: StandardView; label: string; icon: typeof RectangleVertical }[] = [
+    { id: "front", label: "Front view", icon: RectangleVertical },
+    { id: "side", label: "Side view", icon: RectangleHorizontal },
+    { id: "top", label: "Top view", icon: Box }
+  ];
+
   return (
     <>
       <div className="workspace-sidebar-column-heading">
         <span>Viewport</span>
       </div>
+
+      <SidebarGroup>
+        <SidebarGroupLabel>Standard view</SidebarGroupLabel>
+        <SidebarGroupContent className="flex gap-1 px-1">
+          {standardViews.map(({ id, label, icon: Icon }) => (
+            <Button
+              key={id}
+              variant={view.standardView === id ? "secondary" : "ghost"}
+              size="icon"
+              className="size-9"
+              aria-label={label}
+              aria-pressed={view.standardView === id}
+              title={label}
+              onClick={() => onViewChange({ standardView: id })}
+            >
+              <Icon />
+            </Button>
+          ))}
+        </SidebarGroupContent>
+      </SidebarGroup>
+
+      <SidebarSeparator />
 
       <SidebarGroup>
         <SidebarGroupLabel>Objects</SidebarGroupLabel>
@@ -270,8 +298,6 @@ function ViewPanel({ view, onViewChange, onToggleObject }: Pick<InspectorProps, 
                   title={shown ? `Hide ${name}` : `Show ${name}`}
                   onClick={() => onToggleObject(id)}
                 >
-                  {/* A half-lit eye is the transparent state, set from the
-                      viewport; the eye itself only ever shows or hides. */}
                   {shown ? <Eye className={visibility === "ghost" ? "opacity-45" : undefined} /> : <EyeOff className="opacity-50" />}
                 </Button>
               </div>
