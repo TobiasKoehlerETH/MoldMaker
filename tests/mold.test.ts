@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { buildMold, DEFAULT_PARAMS, flowPorts, moldParamsSchema, partingHeight, splitAxis } from "../src/shared/mold";
+import { buildMold, DEFAULT_PARAMS, flowPorts, moldBounds, moldParamsSchema, partingHeight, splitAxis } from "../src/shared/mold";
 import { decodeProject, encodeProject } from "../src/shared/project";
 import { readStepModel } from "../src/shared/step";
 import { boundsOf, planarDistance } from "../src/shared/vec3";
@@ -20,12 +20,24 @@ describe("RTV mold plan", () => {
 
     expect(mold.size).toEqual(mold.minSize);
     mold.size.forEach((span, axis) => {
-      // Whole millimetres, grown past the cavity plus the wall but never by a full one.
-      const exact = max[axis] - min[axis] + 2 * wall;
+      // Whole millimetres, grown past the cavity plus the wall/clearances but never by a full one.
+      const exact = max[axis] + (axis === 2 ? DEFAULT_PARAMS.topEndClearance : wall) -
+        (min[axis] - (axis === 2 ? DEFAULT_PARAMS.bottomEndClearance : wall));
       expect(span).toBe(Math.round(span));
       expect(span).toBeGreaterThanOrEqual(exact - 1e-6);
       expect(span).toBeLessThan(exact + 1);
     });
+  });
+
+  it("uses independent top and base clearances without changing the lateral wall", () => {
+    const [min, max] = moldBounds([0, 0, 0], [10, 20, 30], {
+      ...DEFAULT_PARAMS,
+      topEndClearance: 3,
+      bottomEndClearance: 2
+    });
+
+    expect(min).toEqual([-6, -6, -2]);
+    expect(max).toEqual([16, 26, 33]);
   });
 
   it("grows the block by the requested padding, keeping the cavity centred", () => {
@@ -126,9 +138,17 @@ describe("RTV mold plan", () => {
 
   it("defaults the port and block settings so older projects still load", () => {
     const older: Record<string, unknown> = { ...DEFAULT_PARAMS };
-    for (const key of ["screwDiameter", "padding", "gateOffset", "splitOffset"]) delete older[key];
+    for (const key of ["screwDiameter", "padding", "gateOffset", "splitOffset", "topEndClearance", "bottomEndClearance"]) delete older[key];
 
     expect(moldParamsSchema.parse(older)).toEqual(DEFAULT_PARAMS);
+  });
+
+  it("migrates the former single end clearance to both mold ends", () => {
+    const legacy: Record<string, unknown> = { ...DEFAULT_PARAMS, endClearance: 4 };
+    delete legacy.topEndClearance;
+    delete legacy.bottomEndClearance;
+
+    expect(moldParamsSchema.parse(legacy)).toMatchObject({ topEndClearance: 4, bottomEndClearance: 4 });
   });
 });
 

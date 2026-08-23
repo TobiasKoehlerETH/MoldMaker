@@ -48,7 +48,7 @@ would otherwise freeze the UI. The worker owns the only OpenCascade instance.
 | Preload | `src/preload/index.ts` | Exposes the minimal `window.moldMaker` API through `contextBridge`. |
 | Native contract | `src/shared/electron-api.ts` | IPC channel names, request validation, response types, and the renderer-facing API. |
 | STEP reader | `src/shared/step.ts` | Minimal ISO 10303-21 parser; tessellates edge curves and reports bounds and cylindrical bores. |
-| Mold plan | `src/shared/mold.ts` | Parameter schema and the fast preview plan: split axis, wall, gate, vents, and screw holes. |
+| Mold plan | `src/shared/mold.ts` | Parameter schema and the fast preview plan: split axis, lateral wall, top/base clearances, gate, vents, and screw holes. |
 | CAD contract | `src/shared/cad.ts` | Worker request/response types, including the preview meshes. |
 | Project file | `src/shared/project.ts` | `.moldmaker` serialisation; embeds the STEP source so a project reopens standalone. |
 | Vector maths | `src/shared/vec3.ts` | Shared vector helpers, bounding boxes, and planar distance. |

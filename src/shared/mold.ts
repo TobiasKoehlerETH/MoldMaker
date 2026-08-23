@@ -4,12 +4,18 @@ import { boundsOf, planarDistance, type Vec3 } from "./vec3";
 
 /** Block material addable beyond the wall, per axis. */
 export const MAX_PADDING = 120;
+/** Maximum material allowed between the part's extreme Z surfaces and a mold end. */
+export const MAX_END_CLEARANCE = 30;
 
 const padding = z.number().min(0).max(MAX_PADDING);
 const offset = z.number().min(-500).max(500);
 
-export const moldParamsSchema = z.object({
+const moldParamsShape = z.object({
   wallThickness: z.number().min(3).max(30),
+  // Material between each extreme part surface and its mold end. These are
+  // separate from the lateral wall thickness and from one another.
+  topEndClearance: z.number().min(1).max(MAX_END_CLEARANCE).default(2),
+  bottomEndClearance: z.number().min(1).max(MAX_END_CLEARANCE).default(1),
   injectionDiameter: z.number().min(1).max(10),
   ventDiameter: z.number().min(0.2).max(2),
   // Clearance hole for the screws clamping the halves together. Defaulted so
@@ -25,6 +31,18 @@ export const moldParamsSchema = z.object({
   // Uniformly enlarges the casting model to compensate for material shrinkage.
   shrinkageScale: z.number().min(0).max(100).default(0)
 });
+
+/** Migrates projects written with the former single end-clearance setting. */
+export const moldParamsSchema = z.preprocess((value) => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+  const params = value as Record<string, unknown>;
+  if (!("endClearance" in params)) return params;
+  return {
+    ...params,
+    topEndClearance: params.topEndClearance ?? params.endClearance,
+    bottomEndClearance: params.bottomEndClearance ?? params.endClearance
+  };
+}, moldParamsShape);
 
 export type MoldParams = z.infer<typeof moldParamsSchema>;
 export type SplitAxis = 0 | 1 | 2;
@@ -50,6 +68,8 @@ export interface Mold {
 
 export const DEFAULT_PARAMS: MoldParams = {
   wallThickness: 6,
+  topEndClearance: 2,
+  bottomEndClearance: 1,
   injectionDiameter: 3.2,
   ventDiameter: 0.8,
   screwDiameter: 3.4,
@@ -95,9 +115,12 @@ export function splitAxis(part: PartModel): SplitAxis {
  * inspector-set outer size lands identically in the wireframe and the solids.
  */
 export const moldBounds = (cavityMin: Vec3, cavityMax: Vec3, params: MoldParams): [Vec3, Vec3] => {
-  const margin = (axis: number): number => params.wallThickness + params.padding[axis] / 2;
-  const min = cavityMin.map((value, axis) => value - margin(axis)) as Vec3;
-  const max = cavityMax.map((value, axis) => value + margin(axis)) as Vec3;
+  const minMargin = (axis: number): number =>
+    (axis === 2 ? params.bottomEndClearance : params.wallThickness) + params.padding[axis] / 2;
+  const maxMargin = (axis: number): number =>
+    (axis === 2 ? params.topEndClearance : params.wallThickness) + params.padding[axis] / 2;
+  const min = cavityMin.map((value, axis) => value - minMargin(axis)) as Vec3;
+  const max = cavityMax.map((value, axis) => value + maxMargin(axis)) as Vec3;
   const grown = max.map((value, axis) => {
     const extra = Math.ceil(value - min[axis] - 1e-6) - (value - min[axis]);
     return { min: min[axis] - extra / 2, max: value + extra / 2 };
@@ -253,9 +276,14 @@ export function buildMold(part: PartModel, params: MoldParams): Mold {
     gateRange: gateRangeOf(cavityMin, cavityMax, params.injectionDiameter),
     splitRange: splitRangeOf(points, cavityMin, cavityMax),
     size: max.map((value, index) => value - min[index]) as Vec3,
-    // Size at zero padding: the smallest block the wall allows, in whole mm.
+    // Size at zero padding: the smallest block the wall/end clearances allow, in whole mm.
     minSize: cavityMax.map(
-      (value, index) => Math.ceil(value - cavityMin[index] + 2 * wall - 1e-6)
+      (value, index) =>
+        Math.ceil(
+          value - cavityMin[index] +
+            (index === 2 ? params.topEndClearance + params.bottomEndClearance : 2 * wall) -
+            1e-6
+        )
     ) as Vec3
   };
 }

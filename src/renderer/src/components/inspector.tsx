@@ -13,7 +13,7 @@ import {
 } from "@/components/ui/sidebar";
 import { Slider } from "@/components/ui/slider";
 import { OBJECT_LABELS, OBJECT_ORDER, type SceneObjectId, type ViewState } from "@/viewport/modes";
-import { MAX_PADDING, type Mold, type MoldParams } from "../../../shared/mold";
+import { MAX_END_CLEARANCE, MAX_PADDING, type Mold, type MoldParams } from "../../../shared/mold";
 
 interface InspectorProps {
   section: "all";
@@ -47,6 +47,8 @@ interface Draft {
 const FIELDS = [
   { key: "shrinkageScale", label: "Shrinkage", step: 0.1, min: 0, max: 100, unit: "%" },
   { key: "wallThickness", label: "Wall", step: 0.5, min: 3, max: 30, unit: "mm" },
+  { key: "topEndClearance", label: "Top clearance", step: 0.5, min: 1, max: MAX_END_CLEARANCE, unit: "mm" },
+  { key: "bottomEndClearance", label: "Base clearance", step: 0.5, min: 1, max: MAX_END_CLEARANCE, unit: "mm" },
   { key: "injectionDiameter", label: "Syringe port", step: 0.1, min: 1, max: 10, unit: "mm" },
   { key: "ventDiameter", label: "Air vents", step: 0.1, min: 0.2, max: 2, unit: "mm" },
   { key: "screwDiameter", label: "Mounting holes", step: 0.1, min: 1.5, max: 12, unit: "mm" }
@@ -140,9 +142,9 @@ function MoldPanel({ params, mold, onChange }: Pick<InspectorProps, "params" | "
 
       <SidebarSeparator />
 
-      {/* Outer block size. The wall sets the smallest block that still encloses
-          the part, so these only ever grow it — typing an axis down to its
-          minimum hands it back to the wall. */}
+      {/* Outer block size. The wall and end clearance set the smallest block
+          that still encloses the part, so these only ever grow it — typing an
+          axis down to its minimum hands it back to those settings. */}
       <SidebarGroup>
         <SidebarGroupLabel>Block size</SidebarGroupLabel>
         <SidebarGroupContent className="space-y-2 px-2 pb-2">

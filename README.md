@@ -9,7 +9,7 @@ MoldMaker turns a finished part's STEP file into a printable two-part RTV silico
 3. Inspect the exact OpenCascade result in the CAD viewport. Shading modes include solid, transparent, ghosted half, full edges, hidden cast part, and exploded view.
 4. Select **Export mold**. The chosen directory receives `*-lower.step`, `*-upper.step`, `*-lower.stl`, and `*-upper.stl`.
 
-The defaults target a general RTV workflow: 6 mm walls, a 3.2 mm syringe port, 0.8 mm vents, and 0.2% scale compensation. Confirm shrinkage against the silicone datasheet and inspect the split/gate placement before printing, especially for parts with deep undercuts.
+The defaults target a general RTV workflow: 6 mm lateral walls, 2 mm top clearance, 1 mm base clearance, a 3.2 mm syringe port, 0.8 mm vents, and 0.2% scale compensation. Confirm shrinkage against the silicone datasheet and inspect the split/gate placement before printing, especially for parts with deep undercuts.
 
 ## Preview
 
