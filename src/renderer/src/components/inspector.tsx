@@ -13,7 +13,7 @@ import {
 } from "@/components/ui/sidebar";
 import { Slider } from "@/components/ui/slider";
 import { OBJECT_LABELS, OBJECT_ORDER, type SceneObjectId, type StandardView, type ViewState } from "@/viewport/modes";
-import { MAX_END_CLEARANCE, MAX_PADDING, type Mold, type MoldParams } from "../../../shared/mold";
+import { constrainGateOffset, MAX_END_CLEARANCE, MAX_PADDING, type Mold, type MoldParams } from "../../../shared/mold";
 
 interface InspectorProps {
   section: "all";
@@ -134,7 +134,15 @@ function MoldPanel({ params, mold, onChange }: Pick<InspectorProps, "params" | "
               min={min}
               max={max}
               unit={unit}
-              onChange={(value) => onChange({ [key]: value })}
+              onChange={(value) => {
+                if (key === "injectionDiameter" && mold) {
+                  const diameterDelta = (params.injectionDiameter - value) / 2;
+                  const gateRange = mold.gateRange.map((range) => Math.max(0, range + diameterDelta)) as [number, number];
+                  onChange({ injectionDiameter: value, gateOffset: constrainGateOffset(params.gateOffset, gateRange) });
+                  return;
+                }
+                onChange({ [key]: value });
+              }}
             />
           ))}
         </SidebarGroupContent>
@@ -175,31 +183,38 @@ function MoldPanel({ params, mold, onChange }: Pick<InspectorProps, "params" | "
 
       <SidebarSeparator />
 
-      {/* The channel is drilled straight down onto the part, so the port lands
-          on the topmost surface under wherever these put it. */}
+      {/* The channel is drilled straight down onto the part. These ranges keep
+          the complete syringe bore inside the cavity footprint. */}
       <SidebarGroup>
         <SidebarGroupLabel>Port position</SidebarGroupLabel>
-        <SidebarGroupContent className="space-y-2 px-2 pb-2">
+        <SidebarGroupContent className="space-y-4 px-2 pb-2">
           {mold ? (
             <>
-              {AXES.slice(0, 2).map((axis, index) => (
-                <NumberField
-                  key={axis}
-                  id={`port-${axis}`}
-                  label={axis}
-                  name={`Port ${axis}`}
-                  value={params.gateOffset[index]}
-                  step={0.5}
-                  min={-mold.gateRange[index]}
-                  max={mold.gateRange[index]}
-                  unit="mm"
-                  onChange={(value) => {
-                    const gateOffset = [...params.gateOffset] as MoldParams["gateOffset"];
-                    gateOffset[index] = value;
-                    onChange({ gateOffset });
-                  }}
-                />
-              ))}
+              {AXES.slice(0, 2).map((axis, index) => {
+                const range = mold.gateRange[index];
+                const gateOffset = constrainGateOffset(params.gateOffset, mold.gateRange);
+                return (
+                  <div key={axis} className="space-y-2">
+                    <div className="flex items-center justify-between gap-3 text-sm">
+                      <Label className="text-sidebar-foreground/75">{axis} position</Label>
+                      <span className="tabular-nums text-sidebar-foreground">{format(gateOffset[index])} mm</span>
+                    </div>
+                    <Slider
+                      aria-label={`Port ${axis} position`}
+                      value={[gateOffset[index]]}
+                      min={-range}
+                      max={range}
+                      step={0.1}
+                      disabled={range === 0}
+                      onValueChange={([value]) => {
+                        const next = [...gateOffset] as MoldParams["gateOffset"];
+                        next[index] = value;
+                        onChange({ gateOffset: next });
+                      }}
+                    />
+                  </div>
+                );
+              })}
             </>
           ) : (
             <p className="text-sm text-sidebar-foreground/55">Import a part to move the port.</p>

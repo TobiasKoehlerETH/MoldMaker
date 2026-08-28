@@ -14,7 +14,7 @@ import {
   Vector
 } from "replicad";
 import type { CadMesh, CadPreview, CadRequest, CadResponse, GeneratedFile, GenerateMoldRequest } from "../../shared/cad";
-import { flowPorts, moldBounds, partingLevel, screwPoints, type SplitAxis } from "../../shared/mold";
+import { constrainGateOffset, flowPorts, gateRangeOf, moldBounds, partingLevel, screwPoints, type SplitAxis } from "../../shared/mold";
 import type { Vec3 } from "../../shared/vec3";
 
 const ready = initOpenCascade({ locateFile: () => openCascadeWasm }).then(setOC);
@@ -375,7 +375,8 @@ async function generate({ step, params, splitAxis }: GenerateMoldRequest): Promi
     bore.delete();
   }
 
-  const { gate, vents } = flowPorts(part.surface, part.min, part.max, params.gateOffset);
+  const gateRange = gateRangeOf(part.min, part.max, params.injectionDiameter);
+  const { gate, vents } = flowPorts(part.surface, part.min, part.max, constrainGateOffset(params.gateOffset, gateRange));
   for (const [point, diameter] of [[gate, params.injectionDiameter], ...vents.map((point) => [point, params.ventDiameter] as const)] as const) {
     const channel = makeCylinder(diameter / 2, max[2] - point[2] + 0.5, [point[0], point[1], point[2] - 0.25]);
     upper = replace(upper, upper.cut(channel));

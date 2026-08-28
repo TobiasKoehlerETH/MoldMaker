@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { buildMold, DEFAULT_PARAMS, flowPorts, moldBounds, moldParamsSchema, partingHeight, splitAxis } from "../src/shared/mold";
+import { buildMold, constrainGateOffset, DEFAULT_PARAMS, flowPorts, moldBounds, moldParamsSchema, partingHeight, splitAxis } from "../src/shared/mold";
 import { decodeProject, encodeProject } from "../src/shared/project";
 import { DEFAULT_VIEW } from "../src/shared/view";
 import { readStepModel } from "../src/shared/step";
@@ -99,13 +99,11 @@ describe("RTV mold plan", () => {
     const offset: [number, number] = [mold.gateRange[0], 0];
     const { gate, vents } = flowPorts(points, min, max, offset);
 
-    // The gate follows the offset as far as the part reaches, and stays on the
-    // surface rather than floating out to the requested point.
-    expect(gate[0]).toBeGreaterThan(mold.gate[0]);
-    expect(planarDistance(gate, [centre[0] + offset[0], centre[1]])).toBeLessThanOrEqual(
-      planarDistance(mold.gate, [centre[0] + offset[0], centre[1]])
-    );
-    expect(points.some((point) => point[0] === gate[0] && point[1] === gate[1] && point[2] === gate[2])).toBe(true);
+    // The gate follows the requested plan position exactly; the nearest surface
+    // sample supplies its height without making the control jump between vertices.
+    expect(gate[0]).toBeCloseTo(centre[0] + offset[0], 6);
+    expect(gate[1]).toBeCloseTo(centre[1], 6);
+    expect(points.some((point) => point[2] === gate[2])).toBe(true);
     // Vents belong at the high points wherever the gate goes.
     vents.forEach((vent) => expect(max[2] - vent[2]).toBeLessThanOrEqual(Math.max(0.1, (max[2] - min[2]) * 0.02)));
   });
@@ -129,6 +127,19 @@ describe("RTV mold plan", () => {
 
     expect(mold.gateRange[0]).toBeCloseTo((max[0] - min[0] - DEFAULT_PARAMS.injectionDiameter) / 2, 6);
     expect(mold.gateRange[1]).toBeCloseTo((max[1] - min[1] - DEFAULT_PARAMS.injectionDiameter) / 2, 6);
+  });
+
+  it("constrains port offsets to positions that accept the full bore", () => {
+    expect(constrainGateOffset([500, -500], [12, 8])).toEqual([12, -8]);
+    expect(constrainGateOffset([4, -3], [12, 8])).toEqual([4, -3]);
+
+    const base = buildMold(part, DEFAULT_PARAMS);
+    const constrained = buildMold(part, { ...DEFAULT_PARAMS, gateOffset: [500, -500] });
+    const [min, max] = boundsOf(constrained.partEdges.flat());
+    const centre: [number, number] = [(min[0] + max[0]) / 2, (min[1] + max[1]) / 2];
+
+    expect(constrained.gate[0]).toBeLessThanOrEqual(centre[0] + base.gateRange[0] + 1e-6);
+    expect(constrained.gate[1]).toBeGreaterThanOrEqual(centre[1] - base.gateRange[1] - 1e-6);
   });
 
   it("rejects dimensions that are unsuitable for a printable mold", () => {

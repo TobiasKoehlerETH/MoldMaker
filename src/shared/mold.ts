@@ -191,7 +191,9 @@ function surfacePoint(points: Vec3[], target: [number, number]): Vec3 | null {
       reach = Math.min(reach, distance);
     }
   }
-  return best;
+  // Keep the requested plan position exact so small slider moves produce small
+  // gate moves. The nearest sample supplies only the surface height.
+  return best ? [target[0], target[1], best[2]] : null;
 }
 
 /**
@@ -225,6 +227,15 @@ export function flowPorts(
 export const gateRangeOf = (cavityMin: Vec3, cavityMax: Vec3, injectionDiameter: number): [number, number] => [
   Math.max(0, (cavityMax[0] - cavityMin[0] - injectionDiameter) / 2),
   Math.max(0, (cavityMax[1] - cavityMin[1] - injectionDiameter) / 2)
+];
+
+/** Holds a requested gate position inside the area that can accept its full bore. */
+export const constrainGateOffset = (
+  gateOffset: [number, number],
+  gateRange: [number, number]
+): [number, number] => [
+  Math.min(gateRange[0], Math.max(-gateRange[0], gateOffset[0])),
+  Math.min(gateRange[1], Math.max(-gateRange[1], gateOffset[1]))
 ];
 
 /**
@@ -261,7 +272,8 @@ export function buildMold(part: PartModel, params: MoldParams): Mold {
   const wall = params.wallThickness;
   const [min, max] = moldBounds(cavityMin, cavityMax, params);
   const splitZ = partingLevel(points, cavityMin, cavityMax, params.splitOffset);
-  const { gate, vents } = flowPorts(points, cavityMin, cavityMax, params.gateOffset);
+  const gateRange = gateRangeOf(cavityMin, cavityMax, params.injectionDiameter);
+  const { gate, vents } = flowPorts(points, cavityMin, cavityMax, constrainGateOffset(params.gateOffset, gateRange));
   const screws = screwPoints(min, max, wall, params.screwDiameter);
 
   return {
@@ -273,7 +285,7 @@ export function buildMold(part: PartModel, params: MoldParams): Mold {
     gate,
     vents,
     screws,
-    gateRange: gateRangeOf(cavityMin, cavityMax, params.injectionDiameter),
+    gateRange,
     splitRange: splitRangeOf(points, cavityMin, cavityMax),
     size: max.map((value, index) => value - min[index]) as Vec3,
     // Size at zero padding: the smallest block the wall/end clearances allow, in whole mm.
