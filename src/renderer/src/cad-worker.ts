@@ -128,15 +128,24 @@ function reachesWall(shape: Shape3D, min: SimplePoint, max: SimplePoint): boolea
  */
 function moveCores(from: Shape3D, to: Shape3D, min: SimplePoint, max: SimplePoint): [Shape3D, Shape3D] {
   const pieces = solidsOf(from);
-  const wallPieces = pieces.filter((piece) => reachesWall(piece, min, max));
-  const cores = pieces.filter((piece) => !reachesWall(piece, min, max));
+  let wallPieces = pieces.filter((piece) => reachesWall(piece, min, max));
+  let cores = pieces.filter((piece) => !reachesWall(piece, min, max));
   if (cores.length === 0) {
     pieces.forEach((piece) => piece.delete());
     return [from, to];
   }
   if (wallPieces.length === 0) {
-    pieces.forEach((piece) => piece.delete());
-    throw new Error("Mold half has no component connected to its outer wall");
+    // OpenCascade can split a wall into a solid whose bounding box ends just
+    // inside the block after a pocket boolean. Keep the largest component as
+    // the wall and move only the smaller enclosed components. This preserves
+    // a printable half while still relocating genuine pocket cores.
+    const extent = (piece: Shape3D): number => {
+      const [low, high] = piece.boundingBox.bounds;
+      return (high[0] - low[0]) * (high[1] - low[1]) * (high[2] - low[2]);
+    };
+    const fallbackWall = pieces.reduce((largest, piece) => extent(piece) > extent(largest) ? piece : largest);
+    wallPieces = [fallbackWall];
+    cores = pieces.filter((piece) => piece !== fallbackWall);
   }
 
   // Rebuild the source from the components we want to retain. Boolean-cutting
@@ -377,9 +386,17 @@ async function generate({ step, params, splitAxis }: GenerateMoldRequest): Promi
 
   const gateRange = gateRangeOf(part.min, part.max, params.injectionDiameter);
   const { gate, vents } = flowPorts(part.surface, part.min, part.max, constrainGateOffset(params.gateOffset, gateRange));
+  // The upper half can carry a pocket core below the parting plane. A cutter
+  // that begins at the sampled part surface can stop inside that core, leaving
+  // a blind syringe port. Span the finished upper solid, including its core,
+  // with clearance beyond both exposed ends.
+  const [upperMin, upperMax] = upper.boundingBox.bounds;
+  const channelBottom = upperMin[2] - 1;
+  const channelHeight = upperMax[2] - upperMin[2] + 2;
   for (const [point, diameter] of [[gate, params.injectionDiameter], ...vents.map((point) => [point, params.ventDiameter] as const)] as const) {
-    const channel = makeCylinder(diameter / 2, max[2] - point[2] + 0.5, [point[0], point[1], point[2] - 0.25]);
+    const channel = makeCylinder(diameter / 2, channelHeight, [point[0], point[1], channelBottom]);
     upper = replace(upper, upper.cut(channel));
+    channel.delete();
   }
 
   halves?.lower.delete();

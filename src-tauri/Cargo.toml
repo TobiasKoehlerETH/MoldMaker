@@ -1,6 +1,6 @@
 [package]
 name = "moldmaker"
-version = "0.1.1"
+version = "0.1.2"
 description = "Offline STEP-to-RTV silicone mold generator"
 authors = ["MoldMaker"]
 license = "MIT"

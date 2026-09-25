@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.2] — 2026-09-25
+
+- Drilled syringe and vent channels through the full upper mold, including
+  pocket cores extending below the parting plane, so the ports remain open.
+- Kept the mold wall connected when OpenCascade returns an inset bounding box
+  after a pocket cut.
+
 ## [0.1.1] — 2026-08-28
 
 - Replaced syringe-port coordinate fields with direct X/Y positioning sliders.
@@ -18,5 +25,6 @@
 - Removed obsolete Electron runtime code, generated build artifacts, icon
   explorations, and the Electron-specific end-to-end harness.
 
+[0.1.2]: https://github.com/TobiasKoehlerETH/MoldMaker/releases/tag/v0.1.2
 [0.1.1]: https://github.com/TobiasKoehlerETH/MoldMaker/releases/tag/v0.1.1
 [0.1.0]: https://github.com/TobiasKoehlerETH/MoldMaker/releases/tag/v0.1.0

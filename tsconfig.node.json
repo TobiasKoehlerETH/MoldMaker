@@ -15,6 +15,7 @@
     "eslint.config.mjs",
     "vitest.config.ts",
     "src/shared/**/*.ts",
+    "src/renderer/src/env.d.ts",
     "tests/**/*.ts"
   ]
 }
